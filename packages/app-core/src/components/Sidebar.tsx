@@ -1,6 +1,6 @@
 import { createCanvas } from '../lib/canvas-actions'
 import { translateNote } from '../lib/maxa-panels'
-import { RecentView } from './MaxaPanels'
+import { SidebarRecent } from './MaxaPanels'
 import { runNoteLifecycleAction, runNoteBatchAction, runEmptyTrash } from "../lib/note-lifecycle-actions";
 import {
   createContext,
@@ -3117,7 +3117,7 @@ export function Sidebar(): JSX.Element {
         </div>
       </div>
 
-      <RecentView compact />
+      <SidebarRecent />
 
       {/* Search + toolbar on one row. flex-wrap: on a narrow sidebar the
        *  icon strip drops to its own line under the search field instead of

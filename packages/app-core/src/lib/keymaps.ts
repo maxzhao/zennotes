@@ -9,6 +9,7 @@ export type KeymapScope =
 export type KeymapGroup = "global" | "vim" | "navigation" | "view-actions";
 
 export type KeymapId =
+  | "global.openRecent"
   | "global.searchNotes"
   | "global.searchNotesNonVim"
   | "global.commandPalette"
@@ -196,6 +197,7 @@ export interface KeymapDefinition {
   maxTokens?: number;
 }
 const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
+  { id: "global.openRecent", kind: "shortcut", scope: "app", group: "global", title: "Open Recent", description: "Open the filterable recent-files palette.", defaultBinding: "Shift+Mod+R" },
   {
     id: "global.searchNotes",
     kind: "shortcut",

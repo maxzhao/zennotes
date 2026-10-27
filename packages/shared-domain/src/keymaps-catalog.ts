@@ -43,6 +43,7 @@ export const KEYMAP_GROUP_LABELS: Record<string, string> = {
 export const KEYMAP_CATALOG: KeymapCatalogEntry[] = [
   { id: "global.searchNotes", group: "global", defaultBinding: "Mod+P", title: "Search notes" },
   { id: "global.searchNotesNonVim", group: "global", defaultBinding: "Mod+F", title: "Search notes in non-Vim mode" },
+  { id: "global.openRecent", group: "global", defaultBinding: "Shift+Mod+R", title: "Open Recent" },
   { id: "global.commandPalette", group: "global", defaultBinding: "Shift+Mod+P", title: "Open command palette" },
   { id: "global.newQuickNote", group: "global", defaultBinding: "Shift+Mod+N", title: "New quick note" },
   { id: "global.newNoteHere", group: "global", defaultBinding: "Mod+N", title: "New note in current folder" },

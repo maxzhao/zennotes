@@ -1,3 +1,4 @@
+import { useMaxaPanels } from './lib/maxa-panels'
 import { requestSettingsTarget } from './lib/settings-navigation'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -796,6 +797,16 @@ function App(): JSX.Element {
         }
       }
 
+      if (matchesShortcut(e, overrides, 'global.openRecent')) {
+        if (overlayOpen) return
+        e.preventDefault()
+        setBufferPaletteOpen(false)
+        setVaultTextSearchOpen(false)
+        setCommandPaletteOpen(false)
+        setSearchOpen(false)
+        useMaxaPanels.setState({ recent: true })
+        return
+      }
       if (matchesShortcut(e, overrides, 'global.commandPalette')) {
         // ⇧⌘P — command palette
         e.preventDefault()
