@@ -5940,7 +5940,9 @@ export function SettingsModal(): JSX.Element {
 
   const query = navQuery.trim().toLowerCase();
   const searchResults = getSettingsSearchResults(
-    inNavigationOrder(categories, SETTINGS_NAVIGATION_ORDER),
+    inNavigationOrder(categories.filter((category) =>
+      appInfo.runtime !== "web" || (category.id !== "mcp" && category.id !== "cli")
+    ), SETTINGS_NAVIGATION_ORDER),
     query,
   );
   const visibleSearchResult =

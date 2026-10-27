@@ -238,6 +238,8 @@ import {
 import {
   isPaneMode,
   paneModesWithPathMode,
+  PREFERRED_PANE_MODE_KEY,
+  readPreferredPaneMode,
   type PaneMode,
   type PaneModesByPath
 } from './lib/pane-mode'
@@ -3359,6 +3361,8 @@ interface Store {
    *  `keepViewModeAcrossNotes` is on, so every note in the pane follows the
    *  pane's current mode instead of its own. Ephemeral, like `paneModes`. */
   paneStickyModes: Record<string, PaneMode>
+  /** Last explicit view choice, global and browser-local (never written to the vault). */
+  preferredPaneMode: PaneMode | null
   /** Right-hand panels per pane, per note path, read only while
    *  `keepPanelsAcrossNotes` is off. In the store for the same reasons as
    *  `paneModes`: it survives EditorPane remounts, follows a rename, and a
@@ -6175,6 +6179,7 @@ export const useStore = create<Store>((set, get) => {
   panePanels: {},
   recentPathRewrites: [],
   paneStickyModes: {},
+  preferredPaneMode: readPreferredPaneMode(),
   noteListCursorIndex: 0,
   connectionsCursorIndex: 0,
   outlineCursorIndex: 0,
@@ -11004,8 +11009,10 @@ export const useStore = create<Store>((set, get) => {
     })
   },
 
-  setPaneModeForPath: (paneId, path, mode) =>
+  setPaneModeForPath: (paneId, path, mode) => {
+    try { localStorage.setItem(PREFERRED_PANE_MODE_KEY, mode) } catch { /* local preference only */ }
     set((s) => ({
+      preferredPaneMode: mode,
       paneModes: {
         ...s.paneModes,
         [paneId]: paneModesWithPathMode(s.paneModes[paneId] ?? {}, path, mode)
@@ -11013,7 +11020,8 @@ export const useStore = create<Store>((set, get) => {
       // Remember the pane's latest mode so `keepViewModeAcrossNotes` can make
       // every note in this pane follow it.
       paneStickyModes: { ...s.paneStickyModes, [paneId]: mode }
-    })),
+    }))
+  },
 
   updatePanePanelsForPath: (paneId, path, update) => {
     // `update` runs out here, not inside `set`: the panel toggles do store

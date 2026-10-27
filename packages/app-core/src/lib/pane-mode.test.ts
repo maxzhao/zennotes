@@ -35,6 +35,13 @@ describe('paneModeForPath fallback (#543)', () => {
     expect(paneModeForPath(modes, 'a.md', 'preview')).toBe('edit')
   })
 
+  it('applies the last global choice to old and new tabs', () => {
+    const modes = { 'a.md': 'edit' as const }
+    expect(paneModeForPath(modes, 'a.md', 'edit', 'preview')).toBe('preview')
+    expect(paneModeForPath(modes, 'b.md', 'edit', 'preview')).toBe('preview')
+    expect(paneModeForPath(modes, 'a.md', 'preview', 'split')).toBe('split')
+  })
+
   it('isPaneMode accepts only the three modes', () => {
     expect(isPaneMode('edit')).toBe(true)
     expect(isPaneMode('preview')).toBe(true)

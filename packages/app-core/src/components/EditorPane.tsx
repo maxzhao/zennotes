@@ -1026,14 +1026,11 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   const keepViewModeAcrossNotes = useStore((s) => s.keepViewModeAcrossNotes)
   const defaultPaneMode = useStore((s) => s.defaultPaneMode)
   const paneStickyMode = useStore((s) => s.paneStickyModes[paneId])
-  // With "keep view mode across notes" on, every note in this pane follows the
-  // pane's current mode instead of its own remembered one (falls back to the
-  // per-note mode until a mode has been picked in this pane). A note with no
-  // remembered mode opens in the Default view mode preference. (#543)
-  const mode =
-    keepViewModeAcrossNotes && paneStickyMode
-      ? paneStickyMode
-      : paneModeForPath(modesByPath, activeTab, defaultPaneMode)
+  const preferredPaneMode = useStore((s) => s.preferredPaneMode)
+  // The latest explicit choice wins globally, including already-open tabs.
+  // Until one is chosen, retain the upstream per-note/default behavior.
+  const mode = paneModeForPath(modesByPath, activeTab, defaultPaneMode,
+    preferredPaneMode ?? (keepViewModeAcrossNotes ? paneStickyMode : null))
   // One sticky set per pane, or one per note when "Keep panels when switching
   // notes" is off (#794). Same names and setter shape as the four `useState`s
   // this replaced, so every toggle and auto-open below is unchanged.

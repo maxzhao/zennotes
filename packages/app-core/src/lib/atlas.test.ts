@@ -4,6 +4,9 @@ import { describe, expect, it } from 'vitest'
 import type { NoteMeta } from '@shared/ipc'
 import {
   atlasHoldsKeyboard,
+  atlasIsTap,
+  parseAtlasViewport,
+  pickAtlasNode,
   atlasNodeRadius,
   atlasRegionDirection,
   buildAtlasGraph,
@@ -13,6 +16,38 @@ import {
   type AtlasPositions
 } from './atlas'
 import { SELF_KEYED_SURFACES } from './self-keyed-surfaces'
+
+describe('Atlas input and viewport state', () => {
+  it('keeps keyboard ownership when a parent panel has stale focus state', () => {
+    expect(atlasHoldsKeyboard('editor', true, true)).toBe(true)
+    expect(atlasHoldsKeyboard('editor', false, true)).toBe(false)
+  })
+
+  it('accepts finger jitter but not a pan as a tap', () => {
+    expect(atlasIsTap(8, 6)).toBe(true)
+    expect(atlasIsTap(13, 0)).toBe(false)
+  })
+
+  it('expands touch targets and prefers the selected node on a second tap', () => {
+    const nodes = [{ path: 'a.md', degree: 0 }, { path: 'b.md', degree: 0 }]
+    const points = [{ sx: 0, sy: 0, s: 1, depth: 100 }, { sx: 25, sy: 0, s: 1, depth: 90 }]
+    const display = [{ alpha: 1 }, { alpha: 1 }]
+    expect(pickAtlasNode(nodes, points, display, 18, 0)).toBe(1)
+    expect(pickAtlasNode(nodes, points, display, -18, 0)).toBe(-1)
+    expect(pickAtlasNode(nodes, points, display, -18, 0, true)).toBe(0)
+    expect(pickAtlasNode(nodes, points, display, 28, 0, true, 'a.md')).toBe(0)
+    expect(pickAtlasNode(nodes, points, display, 28, 0, true)).toBe(1)
+  })
+
+  it('restores a complete camera and rejects invalid local viewport data', () => {
+    const view = { mode3d: true, camera: { yaw: 2, pitch: 0.3, dist: 160, cx: 4, cy: 5, cz: 6 }, sky: { yaw: 2, pitch: 0.3 } }
+    expect(parseAtlasViewport(JSON.stringify(view))).toEqual(view)
+    expect(parseAtlasViewport(null)).toBeNull()
+    expect(parseAtlasViewport('{')).toBeNull()
+    expect(parseAtlasViewport(JSON.stringify({ ...view, camera: { ...view.camera, dist: -1 } }))).toBeNull()
+    expect(parseAtlasViewport(JSON.stringify({ ...view, camera: { ...view.camera, yaw: '2' } }))).toBeNull()
+  })
+})
 
 function keyboardEvent(
   options: Partial<KeyboardEvent> & { key: string; code: string; altGraph?: boolean }

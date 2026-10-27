@@ -19,6 +19,8 @@ export function TitleBar({ standalone = false }: { standalone?: boolean }): JSX.
   const isMac = window.zen.platformSync() === 'darwin'
   const labels = resolveSystemFolderLabels(systemFolderLabels)
 
+  if (window.zen.getAppInfo().runtime === 'web') return null
+
   if (showWindowTitleBar === false) {
     // Onboarding and the no-vault screen have no other chrome to move the
     // window by; in the workspace the sidebar header and tab strip carry it.

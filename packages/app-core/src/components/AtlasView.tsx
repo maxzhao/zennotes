@@ -5,6 +5,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, isAtlasViewActive } from '../store'
 import {
   applyExtraLinkEdges,
+  atlasIsTap,
+  parseAtlasViewport,
+  pickAtlasNode,
+  type AtlasViewport,
   atlasHoldsKeyboard,
   atlasNodeRadius,
   atlasRegionDirection,
@@ -100,7 +104,11 @@ export function AtlasView(): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const focusedPanel = useStore((s) => s.focusedPanel)
-  const [mode3d, setMode3d] = useState(false)
+  const viewportKey = `zen-atlas-view:${vaultRoot}`
+  const initialViewport = useMemo(() => {
+    try { return parseAtlasViewport(localStorage.getItem(viewportKey)) } catch { return null }
+  }, [viewportKey])
+  const [mode3d, setMode3d] = useState(initialViewport?.mode3d ?? false)
   const [lens, setLens] = useState<Lens>(1)
   const [edgeMode, setEdgeMode] = useState(0) // 0 quiet · 1 all · 2 off
   const [filterQ, setFilterQ] = useState('')
@@ -154,6 +162,26 @@ export function AtlasView(): JSX.Element {
   const stateRef = useRef({ mode3d, lens, edgeMode, filterQ, vimMode, graph })
   stateRef.current = { mode3d, lens, edgeMode, filterQ, vimMode, graph }
 
+  const fitted = useRef(initialViewport !== null)
+  useEffect(() => {
+    fitted.current = initialViewport !== null
+    setMode3d(initialViewport?.mode3d ?? false)
+    previousMode.current = initialViewport?.mode3d ?? false
+    savedView.current = initialViewport?.sky ?? { yaw: 0.6, pitch: 0.3 }
+    world.current.focusPath = null
+    const cam = world.current.cam
+    if (!initialViewport) {
+      cam.yaw = cam.yawT = 0
+      cam.pitch = cam.pitchT = 0
+      return
+    }
+    for (const key of ['yaw', 'pitch', 'dist', 'cx', 'cy', 'cz'] as const) {
+      cam[key] = initialViewport.camera[key]
+      cam[`${key}T`] = initialViewport.camera[key]
+    }
+    touch()
+  }, [initialViewport, viewportKey])
+
   useEffect(() => {
     world.current.display = graph.nodes.map((n) => ({ dx: 0, dy: 0, dz: 0, alpha: 0 }))
     graph.nodes.forEach((n, i) => {
@@ -163,7 +191,10 @@ export function AtlasView(): JSX.Element {
       d.dz = stateRef.current.mode3d ? n.z : 0
     })
     world.current.betweenness = null
-    fitAll()
+    if (!fitted.current && graph.nodes.length > 0) {
+      fitAll()
+      fitted.current = true
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph])
 
@@ -176,8 +207,11 @@ export function AtlasView(): JSX.Element {
 
   // The map is a flat plane: it must be viewed level or panning slides on
   // skewed axes. The sky keeps (and remembers) its oblique angle.
-  const savedView = useRef({ yaw: 0.6, pitch: 0.3 })
+  const savedView = useRef(initialViewport?.sky ?? { yaw: 0.6, pitch: 0.3 })
+  const previousMode = useRef(mode3d)
   useEffect(() => {
+    if (previousMode.current === mode3d) return
+    previousMode.current = mode3d
     const cam = world.current.cam
     if (mode3d) {
       cam.yawT = savedView.current.yaw
@@ -188,6 +222,26 @@ export function AtlasView(): JSX.Element {
       cam.pitchT = 0
     }
   }, [mode3d])
+
+  useEffect(() => {
+    const save = (): void => {
+      if (!fitted.current) return
+      const cam = world.current.cam
+      const viewport: AtlasViewport = {
+        mode3d: stateRef.current.mode3d,
+        camera: { yaw: cam.yawT, pitch: cam.pitchT, dist: cam.distT, cx: cam.cxT, cy: cam.cyT, cz: cam.czT },
+        sky: stateRef.current.mode3d ? { yaw: cam.yawT, pitch: cam.pitchT } : savedView.current
+      }
+      try { localStorage.setItem(viewportKey, JSON.stringify(viewport)) } catch { /* local preference only */ }
+    }
+    const timer = window.setInterval(save, 500)
+    window.addEventListener('pagehide', save)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('pagehide', save)
+      save()
+    }
+  }, [viewportKey])
 
   // Obsidian parity, kept view-local: markdown-style note links become edges
   // too, scanned lazily from bodies AFTER first paint through the existing
@@ -601,23 +655,11 @@ export function AtlasView(): JSX.Element {
     return () => clearTimeout(t)
   }, [lens, graph])
 
-  function hitTest(sx: number, sy: number): number {
+  function hitTest(sx: number, sy: number, forTouch = false): number {
     const canvas = canvasRef.current as unknown as { _proj?: Array<null | { sx: number; sy: number; s: number; depth: number }> } | null
     const proj = canvas?._proj
     if (!proj) return -1
-    let best = -1
-    let bd = Infinity
-    stateRef.current.graph.nodes.forEach((n, i) => {
-      const p = proj[i]
-      if (!p || world.current.display[i].alpha < 0.1) return
-      const r = Math.max(1.4, atlasNodeRadius(n.degree) * p.s) + 6
-      const d = (p.sx - sx) ** 2 + (p.sy - sy) ** 2
-      if (d < r * r && p.depth < bd) {
-        bd = p.depth
-        best = i
-      }
-    })
-    return best
+    return pickAtlasNode(stateRef.current.graph.nodes, proj, world.current.display, sx, sy, forTouch, world.current.focusPath)
   }
 
   function touch(): void {
@@ -703,7 +745,7 @@ export function AtlasView(): JSX.Element {
       if (document.querySelector('[data-vim-hint-overlay]')) return
       const active = document.activeElement as HTMLElement | null
       if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return
-      if (!atlasHoldsKeyboard(useStore.getState().focusedPanel, true)) return
+      if (!atlasHoldsKeyboard(useStore.getState().focusedPanel, true, !!active && !!rootRef.current?.contains(active))) return
       const regionDirection = atlasRegionDirection(e)
       if ((e.metaKey || e.ctrlKey || e.altKey) && regionDirection === 0) return
       const st = stateRef.current
@@ -889,9 +931,11 @@ export function AtlasView(): JSX.Element {
       }
       touch()
     }
-    const activateAt = (clientX: number, clientY: number): void => {
+    const activateAt = (clientX: number, clientY: number, forTouch = false): void => {
+      setFocusedPanel('atlas')
+      rootRef.current?.focus({ preventScroll: true })
       const rect = canvas.getBoundingClientRect()
-      const i = hitTest(clientX - rect.left, clientY - rect.top)
+      const i = hitTest(clientX - rect.left, clientY - rect.top, forTouch)
       if (i >= 0) {
         const path = stateRef.current.graph.nodes[i].path
         if (world.current.focusPath === path) openNote(path)
@@ -951,7 +995,7 @@ export function AtlasView(): JSX.Element {
       e.preventDefault()
       if (finger && e.touches.length === 1 && e.touches[0].identifier === finger.id) {
         const t = e.touches[0]
-        if (Math.hypot(t.clientX - finger.startX, t.clientY - finger.startY) > 6) canTap = false
+        if (!atlasIsTap(t.clientX - finger.startX, t.clientY - finger.startY)) canTap = false
         if (!canTap) dragView(t.clientX - finger.x, t.clientY - finger.y)
         finger.x = t.clientX
         finger.y = t.clientY
@@ -977,8 +1021,8 @@ export function AtlasView(): JSX.Element {
       e.preventDefault()
       const t = Array.from(e.changedTouches).find((t) => t.identifier === finger?.id)
       if (e.type === 'touchend' && canTap && e.touches.length === 0 && finger && t &&
-          Math.hypot(t.clientX - finger.startX, t.clientY - finger.startY) <= 6) {
-        activateAt(t.clientX, t.clientY)
+          atlasIsTap(t.clientX - finger.startX, t.clientY - finger.startY)) {
+        activateAt(t.clientX, t.clientY, true)
       }
       canTap = false
       trackTouches(e.touches)

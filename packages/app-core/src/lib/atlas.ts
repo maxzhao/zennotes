@@ -100,8 +100,54 @@ export function atlasRegionDirection(event: KeyboardEvent): -1 | 0 | 1 {
  * answer then; DOM focus is not a reliable witness because opening the map
  * blurs to <body> (#670).
  */
-export function atlasHoldsKeyboard(focusedPanel: string | null, atlasActive: boolean): boolean {
-  return atlasActive && (focusedPanel == null || focusedPanel === 'atlas')
+export function atlasHoldsKeyboard(focusedPanel: string | null, atlasActive: boolean, domOwnsKeyboard = false): boolean {
+  return atlasActive && (domOwnsKeyboard || focusedPanel == null || focusedPanel === 'atlas')
+}
+
+export interface AtlasViewport {
+  mode3d: boolean
+  camera: { yaw: number; pitch: number; dist: number; cx: number; cy: number; cz: number }
+  sky: { yaw: number; pitch: number }
+}
+
+export function parseAtlasViewport(raw: string | null): AtlasViewport | null {
+  try {
+    const v = JSON.parse(raw ?? 'null') as AtlasViewport | null
+    if (!v || typeof v.mode3d !== 'boolean' || !v.camera || !v.sky) return null
+    if (!(['yaw', 'pitch', 'dist', 'cx', 'cy', 'cz'] as const).every((key) =>
+      typeof v.camera[key] === 'number' && Number.isFinite(v.camera[key]))) return null
+    if (!Number.isFinite(v.sky.yaw) || !Number.isFinite(v.sky.pitch) ||
+        Math.abs(v.camera.pitch) > 1.25 || Math.abs(v.sky.pitch) > 1.25 || v.camera.dist <= 0) return null
+    return v
+  } catch { return null }
+}
+
+export function atlasIsTap(dx: number, dy: number): boolean {
+  return Math.hypot(dx, dy) <= 12
+}
+
+export interface AtlasProjection { sx: number; sy: number; s: number; depth: number }
+
+export function pickAtlasNode(
+  nodes: readonly Pick<AtlasNode, 'path' | 'degree'>[],
+  projected: readonly (AtlasProjection | null)[],
+  display: readonly { alpha: number }[],
+  x: number, y: number, touch = false, selectedPath: string | null = null
+): number {
+  let best = -1
+  let score = Infinity
+  for (let i = 0; i < nodes.length; i++) {
+    const p = projected[i]
+    if (!p || !display[i] || display[i].alpha < 0.1) continue
+    const d = Math.hypot(p.sx - x, p.sy - y)
+    const drawn = Math.max(1.4, atlasNodeRadius(nodes[i].degree) * p.s)
+    const radius = touch ? Math.max(nodes[i].path === selectedPath ? 32 : 24, drawn + 12) : drawn + 6
+    if (d > radius) continue
+    if (touch && nodes[i].path === selectedPath) return i
+    const next = touch ? d : p.depth
+    if (next < score) { best = i; score = next }
+  }
+  return best
 }
 
 export function buildAtlasGraph(notes: readonly NoteMeta[]): AtlasGraph {
