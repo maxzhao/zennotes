@@ -5938,11 +5938,12 @@ export function SettingsModal(): JSX.Element {
     },
   ];
 
+  const availableCategories = categories.filter((category) =>
+    appInfo.runtime !== "web" || (category.id !== "mcp" && category.id !== "cli")
+  );
   const query = navQuery.trim().toLowerCase();
   const searchResults = getSettingsSearchResults(
-    inNavigationOrder(categories.filter((category) =>
-      appInfo.runtime !== "web" || (category.id !== "mcp" && category.id !== "cli")
-    ), SETTINGS_NAVIGATION_ORDER),
+    inNavigationOrder(availableCategories, SETTINGS_NAVIGATION_ORDER),
     query,
   );
   const visibleSearchResult =
@@ -6113,7 +6114,7 @@ export function SettingsModal(): JSX.Element {
                       </div>
                       <div className="space-y-0.5">
                         {section.categoryIds.map((id) => {
-                          const cat = categories.find((c) => c.id === id);
+                          const cat = availableCategories.find((c) => c.id === id);
                           if (!cat) return null;
                           const selected = activeCategory === id;
                           return (
