@@ -860,12 +860,44 @@ export function AtlasView(): JSX.Element {
     root.focus({ preventScroll: true })
   }, [isActive, focusedPanel])
 
-  // Mouse: drag orbits in 3D and pans in 2D; wheel flies; click focuses/opens.
+  // Mouse and touch share camera motion and node activation. Touch owns its
+  // gesture so browser scrolling, pinch zoom and compatibility clicks stay out.
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     let drag: { x: number; y: number } | null = null
     let moved = false
+    const dragView = (dx: number, dy: number, panOnly = false): void => {
+      const cam = world.current.cam
+      if (stateRef.current.mode3d && !panOnly) {
+        cam.yawT += dx * 0.005
+        cam.yaw = cam.yawT
+        cam.pitchT = Math.max(-1.25, Math.min(1.25, cam.pitchT + dy * 0.004))
+        cam.pitch = cam.pitchT
+      } else {
+        const s = F / cam.dist
+        const cosY = Math.cos(cam.yaw)
+        const sinY = Math.sin(cam.yaw)
+        const cosP = Math.cos(cam.pitch)
+        const sinP = Math.sin(cam.pitch)
+        cam.cxT -= (cosY * dx + sinY * sinP * dy) / s
+        cam.cyT -= (cosP * dy) / s
+        cam.czT -= (-sinY * dx + cosY * sinP * dy) / s
+        cam.cx = cam.cxT
+        cam.cy = cam.cyT
+        cam.cz = cam.czT
+      }
+      touch()
+    }
+    const activateAt = (clientX: number, clientY: number): void => {
+      const rect = canvas.getBoundingClientRect()
+      const i = hitTest(clientX - rect.left, clientY - rect.top)
+      if (i >= 0) {
+        const path = stateRef.current.graph.nodes[i].path
+        if (world.current.focusPath === path) openNote(path)
+        else world.current.focusPath = path
+      } else world.current.focusPath = null
+    }
     const down = (e: MouseEvent): void => {
       drag = { x: e.clientX, y: e.clientY }
       moved = false
@@ -875,31 +907,12 @@ export function AtlasView(): JSX.Element {
       const rect = canvas.getBoundingClientRect()
       const sx = e.clientX - rect.left
       const sy = e.clientY - rect.top
-      const cam = world.current.cam
       if (drag) {
         const dx = e.clientX - drag.x
         const dy = e.clientY - drag.y
         drag = { x: e.clientX, y: e.clientY }
         if (Math.abs(dx) + Math.abs(dy) > 2) moved = true
-        if (stateRef.current.mode3d && !e.shiftKey) {
-          cam.yawT += dx * 0.005
-          cam.yaw = cam.yawT
-          cam.pitchT = Math.max(-1.25, Math.min(1.25, cam.pitchT + dy * 0.004))
-          cam.pitch = cam.pitchT
-        } else {
-          const s = F / cam.dist
-          const cosY = Math.cos(cam.yaw)
-          const sinY = Math.sin(cam.yaw)
-          const cosP = Math.cos(cam.pitch)
-          const sinP = Math.sin(cam.pitch)
-          cam.cxT -= (cosY * dx + sinY * sinP * dy) / s
-          cam.cyT -= (cosP * dy) / s
-          cam.czT -= (-sinY * dx + cosY * sinP * dy) / s
-          cam.cx = cam.cxT
-          cam.cy = cam.cyT
-          cam.cz = cam.czT
-        }
-        touch()
+        dragView(dx, dy, e.shiftKey)
       } else {
         const i = hitTest(sx, sy)
         world.current.hoverPath = i >= 0 ? stateRef.current.graph.nodes[i].path : null
@@ -907,16 +920,69 @@ export function AtlasView(): JSX.Element {
       }
     }
     const up = (e: MouseEvent): void => {
-      if (drag && !moved) {
-        const rect = canvas.getBoundingClientRect()
-        const i = hitTest(e.clientX - rect.left, e.clientY - rect.top)
-        if (i >= 0) {
-          const path = stateRef.current.graph.nodes[i].path
-          if (world.current.focusPath === path) openNote(path)
-          else world.current.focusPath = path
-        } else world.current.focusPath = null
-      }
+      if (drag && !moved) activateAt(e.clientX, e.clientY)
       drag = null
+    }
+    let finger: { id: number; x: number; y: number; startX: number; startY: number } | null = null
+    let pinch: { ids: [number, number]; distance: number } | null = null
+    let canTap = false
+    const trackTouches = (touches: TouchList): void => {
+      finger = null
+      pinch = null
+      if (touches.length === 1) {
+        const t = touches[0]
+        finger = { id: t.identifier, x: t.clientX, y: t.clientY, startX: t.clientX, startY: t.clientY }
+      } else if (touches.length === 2) {
+        const [a, b] = [touches[0], touches[1]]
+        pinch = { ids: [a.identifier, b.identifier], distance: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) }
+      }
+    }
+    const touchStart = (e: TouchEvent): void => {
+      e.preventDefault()
+      canTap = !finger && !pinch && e.touches.length === 1
+      trackTouches(e.touches)
+      drag = null
+      world.current.hoverPath = null
+      setFocusedPanel('atlas')
+      rootRef.current?.focus({ preventScroll: true })
+      touch()
+    }
+    const touchMove = (e: TouchEvent): void => {
+      e.preventDefault()
+      if (finger && e.touches.length === 1 && e.touches[0].identifier === finger.id) {
+        const t = e.touches[0]
+        if (Math.hypot(t.clientX - finger.startX, t.clientY - finger.startY) > 6) canTap = false
+        if (!canTap) dragView(t.clientX - finger.x, t.clientY - finger.y)
+        finger.x = t.clientX
+        finger.y = t.clientY
+      } else if (pinch && e.touches.length === 2) {
+        const a = Array.from(e.touches).find((t) => t.identifier === pinch!.ids[0])
+        const b = Array.from(e.touches).find((t) => t.identifier === pinch!.ids[1])
+        if (a && b) {
+          const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+          if (distance > 0 && pinch.distance > 0) {
+            const cam = world.current.cam
+            cam.distT = Math.max(F * 0.3, cam.distT * pinch.distance / distance)
+          }
+          pinch.distance = distance
+        }
+        canTap = false
+      } else {
+        canTap = false
+        trackTouches(e.touches)
+      }
+      touch()
+    }
+    const touchEnd = (e: TouchEvent): void => {
+      e.preventDefault()
+      const t = Array.from(e.changedTouches).find((t) => t.identifier === finger?.id)
+      if (e.type === 'touchend' && canTap && e.touches.length === 0 && finger && t &&
+          Math.hypot(t.clientX - finger.startX, t.clientY - finger.startY) <= 6) {
+        activateAt(t.clientX, t.clientY)
+      }
+      canTap = false
+      trackTouches(e.touches)
+      touch()
     }
     const wheel = (e: WheelEvent): void => {
       e.preventDefault()
@@ -953,11 +1019,19 @@ export function AtlasView(): JSX.Element {
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
     canvas.addEventListener('wheel', wheel, { passive: false })
+    canvas.addEventListener('touchstart', touchStart, { passive: false })
+    canvas.addEventListener('touchmove', touchMove, { passive: false })
+    canvas.addEventListener('touchend', touchEnd, { passive: false })
+    canvas.addEventListener('touchcancel', touchEnd, { passive: false })
     return () => {
       canvas.removeEventListener('mousedown', down)
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
       canvas.removeEventListener('wheel', wheel)
+      canvas.removeEventListener('touchstart', touchStart)
+      canvas.removeEventListener('touchmove', touchMove)
+      canvas.removeEventListener('touchend', touchEnd)
+      canvas.removeEventListener('touchcancel', touchEnd)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -971,6 +1045,7 @@ export function AtlasView(): JSX.Element {
       // The map draws its own focus feedback; the browser's focus ring around
       // the whole pane was the "white border" reported alongside #670.
       className="relative flex min-h-0 flex-1 flex-col bg-paper-100 text-ink-900 outline-none"
+      style={{ touchAction: 'none' }}
       onMouseDownCapture={() => setFocusedPanel('atlas')}
       onFocusCapture={() => setFocusedPanel('atlas')}
       tabIndex={0}
