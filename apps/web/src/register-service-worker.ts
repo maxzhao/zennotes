@@ -7,6 +7,6 @@
 export function registerServiceWorker(): void {
   if (!('serviceWorker' in navigator) || window.location.protocol === 'file:') return
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {})
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {})
   })
 }
