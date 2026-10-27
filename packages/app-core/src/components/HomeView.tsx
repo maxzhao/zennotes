@@ -334,7 +334,7 @@ export function HomeView({
                       className="shrink-0 text-ink-400 group-hover:text-ink-600"
                     />
                     <span className="min-w-0 flex-1 truncate text-sm text-ink-800">
-                      {note.title || 'Untitled'}
+                      {note.displayTitle || note.title || 'Untitled'}
                     </span>
                     <span className="shrink-0 text-xs text-ink-400">
                       {timeAgo(note.updatedAt, now)}

@@ -1,3 +1,4 @@
+import { paintCanvasEdges } from '../lib/canvas-export'
 import { parseOutline } from '../lib/outline'
 import { parseBlockAnchors } from '../lib/block-anchors'
 import { VersionConflictBanner } from './VersionConflictBanner'
@@ -60,6 +61,7 @@ interface CardContext {
   patch: (id: string, patch: Partial<CanvasNode>) => void
   edit: (id: string | null) => void
   assetUrl: (path: string) => string
+  resizeEnd: () => void
   resizeStart: () => void
   snapObjects: boolean
   shift: boolean
@@ -110,6 +112,7 @@ function CanvasCard({ data, selected }: NodeProps<FlowCard>): JSX.Element {
         minHeight={60}
         keepAspectRatio={ctx.shift}
         onResizeStart={ctx.resizeStart}
+        onResizeEnd={ctx.resizeEnd}
         onResize={(_, params) =>
           ctx.patch(card.id, {
             x: params.x,
@@ -387,6 +390,8 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
   const doc = parsed.doc,
     docRef = useRef(doc)
   docRef.current = doc
+  const [frontOrder, setFrontOrder] = useState<string[]>([])
+  const selectionAtPointerDown = useRef<Set<string>>(new Set())
   const [selection, setSelection] = useState<Set<string>>(new Set()),
     [edgeSelection, setEdgeSelection] = useState<Set<string>>(new Set())
   const [editing, setEditing] = useState<string | null>(null),
@@ -490,10 +495,24 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
     position: { x: n.x, y: n.y },
     width: n.width,
     height: n.height,
-    style: { width: n.width, height: n.height, zIndex: index },
+    style: {
+      width: n.width,
+      height: n.height,
+      zIndex:
+        n.type === 'group'
+          ? -1
+          : frontOrder.includes(n.id)
+            ? (doc.nodes?.length ?? 0) + frontOrder.indexOf(n.id) + 2
+            : index + 2
+    },
     selected: selection.has(n.id),
     dragHandle: editing === n.id ? '.canvas-drag-handle' : undefined,
-    zIndex: index
+    zIndex:
+      n.type === 'group'
+        ? -1
+        : frontOrder.includes(n.id)
+          ? (doc.nodes?.length ?? 0) + frontOrder.indexOf(n.id) + 2
+          : index + 2
   }))
   const edges: Edge[] = (doc.edges ?? []).map((e) => ({
     id: e.id,
@@ -512,6 +531,7 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
       e.toEnd !== 'none'
         ? { type: 'arrowclosed' as never, color: canvasColor(e.color) }
         : undefined,
+    zIndex: 1,
     interactionWidth: 20
   }))
   const onNodesChange = (changes: NodeChange<FlowCard>[]): void => {
@@ -1028,15 +1048,9 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
       else next.add(id)
       return next
     })
-    if (!locked) {
-      const found = docRef.current.nodes?.find((n) => n.id === id)
-      if (found && found.type !== 'group' && docRef.current.nodes?.at(-1)?.id !== id)
-        commit({
-          ...docRef.current,
-          nodes: [...docRef.current.nodes!.filter((n) => n.id !== id), found]
-        })
-    }
+    setFrontOrder((prev) => [...prev.filter((key) => key !== id), id])
   }
+
   useEffect(() => {
     const listener = (event: Event): void => {
       if (
@@ -1195,6 +1209,9 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
     commit(next, false)
   }
   const touchEnd = (e: ReactPointerEvent): void => {
+    // Mouse drags finish in XYDrag, after its final position update. Ending
+    // in pointerup capture cleared the duplicate map one event too soon.
+    if (e.pointerType !== 'touch') return
     const pending = longPress.current
     if (pending?.node && !pending.ready && !pending.moved) {
       e.stopPropagation()
@@ -1279,6 +1296,7 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
         edit,
         assetUrl,
         resizeStart: begin,
+        resizeEnd: end,
         snapObjects,
         shift,
         reloads
@@ -1307,11 +1325,14 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
             e.dataTransfer.dropEffect = 'copy'
           }
         }}
-        onPointerDownCapture={touchStart}
+        onPointerDownCapture={(e) => {
+          selectionAtPointerDown.current = new Set(selection)
+          touchStart(e)
+        }}
         onPointerUpCapture={touchEnd}
-        onPointerCancelCapture={() => {
+        onPointerCancelCapture={(e) => {
           stopLongPress()
-          end()
+          if (e.pointerType === 'touch') end()
         }}
         onPointerMoveCapture={touchMove}
       >
@@ -1514,8 +1535,8 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
           edgesReconnectable={!locked}
           elementsSelectable
           deleteKeyCode={null}
-          selectionKeyCode="Shift"
-          multiSelectionKeyCode="Shift"
+          selectionKeyCode={null}
+          multiSelectionKeyCode={null}
           panActivationKeyCode="Space"
           panOnDrag={touch || space || embedded ? true : [1]}
           panOnScroll
@@ -1538,15 +1559,13 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
           onNodeClick={(e, n) => {
             if (editing && editing !== n.id) edit(null)
             if (!e.shiftKey) setEdgeSelection(new Set())
-            // React Flow owns the select changes, including Shift toggling.
-            if (!locked) {
-              const found = docRef.current.nodes?.find((c) => c.id === n.id)
-              if (found && found.type !== 'group' && docRef.current.nodes?.at(-1)?.id !== n.id)
-                commit({
-                  ...docRef.current,
-                  nodes: [...docRef.current.nodes!.filter((c) => c.id !== n.id), found]
-                })
-            }
+            setSelection(() => {
+              const next = e.shiftKey ? new Set(selectionAtPointerDown.current) : new Set<string>()
+              if (e.shiftKey && next.has(n.id)) next.delete(n.id)
+              else next.add(n.id)
+              return next
+            })
+            setFrontOrder((prev) => [...prev.filter((id) => id !== n.id), n.id])
           }}
           onNodeDoubleClick={(_, n) => edit(n.id)}
           onNodeDragStart={(event, n) => {
@@ -1778,41 +1797,74 @@ function CanvasExport({
     minY = Math.min(...nodes.map((n) => n.y)) - 30
   const width = full
       ? Math.max(...nodes.map((n) => n.x + n.width)) - minX + 30
-      : (host?.clientWidth ?? 0),
+      : (host?.querySelector<HTMLElement>('.react-flow')?.clientWidth ?? 0),
     height = full
       ? Math.max(...nodes.map((n) => n.y + n.height)) - minY + 30
-      : (host?.clientHeight ?? 0)
+      : (host?.querySelector<HTMLElement>('.react-flow')?.clientHeight ?? 0)
   const save = async (): Promise<void> => {
     if (!host || !nodes.length) return
     setBusy(true)
     try {
-      const { toPng } = await import('html-to-image')
+      const { toCanvas } = await import('html-to-image')
       const el = host.querySelector<HTMLElement>('.react-flow__viewport')
       if (!el) throw new Error('Canvas viewport unavailable.')
       const scale = full ? zoom : zoom * viewport.zoom,
         x = full ? -minX * zoom : viewport.x * zoom,
         y = full ? -minY * zoom : viewport.y * zoom
-      const url = await toPng(el, {
-        width: Math.ceil(width * zoom),
-        height: Math.ceil(height * zoom),
-        pixelRatio: 1,
-        backgroundColor: getComputedStyle(host).backgroundColor || '#fff',
-        style: {
-          width: `${width}px`,
-          height: `${height}px`,
-          transform: `translate(${x}px, ${y}px) scale(${scale})`,
-          transformOrigin: '0 0'
-        },
-        filter: (node) =>
-          !(
-            node instanceof Element &&
-            (node.tagName === 'IFRAME' ||
-              (privacy &&
-                (node.classList.contains('canvas-card-content') ||
-                  node.tagName === 'HEADER' ||
-                  node.classList.contains('react-flow__edge-textwrapper'))))
-          )
-      })
+      const output = document.createElement('canvas')
+      output.width = Math.ceil(width * zoom)
+      output.height = Math.ceil(height * zoom)
+      const context = output.getContext('2d')
+      if (!context) throw new Error('PNG canvas unavailable.')
+      const computed = getComputedStyle(host),
+        background = computed.backgroundColor || '#ffffff',
+        foreground = computed.color || '#222222'
+      context.fillStyle = background
+      context.fillRect(0, 0, output.width, output.height)
+      const layer = async (groups: boolean): Promise<HTMLCanvasElement> =>
+        toCanvas(el, {
+          width: output.width,
+          height: output.height,
+          pixelRatio: 1,
+          style: {
+            width: width + 'px',
+            height: height + 'px',
+            transform: 'translate(' + x + 'px, ' + y + 'px) scale(' + scale + ')',
+            transformOrigin: '0 0'
+          },
+          filter: (node) => {
+            if (privacy && node.nodeType === 3) return false
+            if (!(node instanceof Element)) return true
+            if (
+              node.tagName === 'IFRAME' ||
+              node.classList.contains('react-flow__edges') ||
+              node.classList.contains('react-flow__edge') ||
+              node.classList.contains('react-flow__edgelabel-renderer')
+            )
+              return false
+            if (
+              privacy &&
+              (node.classList.contains('canvas-card-content') ||
+                ['HEADER', 'INPUT', 'TEXTAREA', 'SELECT'].includes(node.tagName))
+            )
+              return false
+            if (node.classList.contains('react-flow__node'))
+              return (
+                (doc.nodes?.find((n) => n.id === node.getAttribute('data-id'))?.type ===
+                  'group') ===
+                groups
+              )
+            return true
+          }
+        })
+      context.drawImage(await layer(true), 0, 0)
+      context.save()
+      context.translate(x, y)
+      context.scale(scale, scale)
+      paintCanvasEdges(context, el, doc, privacy, background, foreground)
+      context.restore()
+      context.drawImage(await layer(false), 0, 0)
+      const url = output.toDataURL('image/png')
       const link = document.createElement('a')
       link.href = url
       link.download = path

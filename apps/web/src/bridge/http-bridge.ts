@@ -297,8 +297,14 @@ function getServerCapabilities(): Promise<ServerCapabilities | null> {
     })
 }
 
-function getServerSession(): Promise<ServerSessionStatus> {
-  return jsonRequest<ServerSessionStatus>('/session')
+async function getServerSession(): Promise<ServerSessionStatus> {
+  try { return await jsonRequest<ServerSessionStatus>('/session') }
+  catch (err) {
+    // The fork protects session status as well as capabilities. A 401 is
+    // the unauthenticated state, not a failure to reach the login service.
+    if (err instanceof HttpRequestError && err.status === 401) return { authenticated: false, authRequired: true, supportsSessionLogin: true }
+    throw err
+  }
 }
 
 function loginServerSession(token: string): Promise<ServerSessionStatus> {
@@ -460,7 +466,16 @@ function writeNoteComments(
 async function writeNote(relPath: string, body: string, options?: WriteOptions): Promise<NoteMeta> {
   // Full-buffer callers supply their original read version. Legacy callers
   // still use a conditional write; never silently request legacy overwrite.
-  const baseVersion = options?.baseVersion ?? (await readNote(relPath)).version
+  let baseVersion = options?.baseVersion
+  if (baseVersion === undefined) {
+    try { baseVersion = (await readNote(relPath)).version }
+    catch (err) {
+      if (!(err instanceof HttpRequestError) || err.status !== 404) throw err
+      // A new database sidecar/CSV is an absent file. Conditional creation
+      // still compares against absence; it must never become legacy overwrite.
+      baseVersion = ''
+    }
+  }
   if (baseVersion === undefined) throw new Error('Server did not return a note version; upgrade the fork server before saving.')
   try {
     return await jsonRequest<NoteMeta>('/notes/write', {

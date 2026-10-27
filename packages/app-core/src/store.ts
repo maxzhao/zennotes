@@ -4374,18 +4374,14 @@ function workspaceModeFrom(info: RemoteWorkspaceInfo | null): WorkspaceMode {
   return info?.mode === 'remote' ? 'remote' : 'local'
 }
 
-async function ensureWebServerSession(
-  capabilities?: ServerCapabilities | null
-): Promise<boolean> {
+async function ensureWebServerSession(): Promise<boolean> {
   if (window.zen.getAppInfo().runtime !== 'web') return true
 
-  const serverCapabilities = capabilities ?? (await window.zen.getServerCapabilities())
-  if (!serverCapabilities?.authRequired || !serverCapabilities.supportsSessionLogin) {
-    return true
-  }
-
+  // Authentication must precede capability discovery: the fork intentionally
+  // protects both /capabilities and /session.
   const session = await window.zen.getServerSession()
-  if (session.authenticated) return true
+  if (session.authenticated || !session.authRequired) return true
+  if (!session.supportsSessionLogin) throw new Error('This server does not support browser session login.')
 
   const token = await promptApp({
     title: 'Server Auth Token',
@@ -5762,11 +5758,11 @@ export const useStore = create<Store>((set, get) => {
     try {
       const remoteWorkspaceProfilesPromise = get().refreshRemoteWorkspaceProfiles()
       const localVaultsPromise = get().refreshLocalVaults()
-      const [bootWorkspaceInfo, serverCapabilities] = await Promise.all([
+      const [bootWorkspaceInfo] = await Promise.all([
         get().refreshWorkspaceContext(),
-        window.zen.getServerCapabilities().catch(() => null)
+        window.zen.getAppInfo().runtime === 'web' ? Promise.resolve(null) : window.zen.getServerCapabilities().catch(() => null)
       ])
-      if (!(await ensureWebServerSession(serverCapabilities))) {
+      if (!(await ensureWebServerSession())) {
         void remoteWorkspaceProfilesPromise
         void localVaultsPromise
         set({
@@ -5781,6 +5777,7 @@ export const useStore = create<Store>((set, get) => {
         })
         return
       }
+      if (window.zen.getAppInfo().runtime === 'web') await window.zen.getServerCapabilities()
       const vault = await window.zen.getCurrentVault()
       // getCurrentVault is what connects a configured remote workspace, so
       // the info fetched above predates the connection: its capabilities and
@@ -8456,7 +8453,9 @@ export const useStore = create<Store>((set, get) => {
         const writtenBody = content.body
         const tagsBefore = s.notes.find((note) => note.path === path)?.tags
         noteContentVersions.set(path, (noteContentVersions.get(path) ?? 0) + 1)
-        const meta = await window.zen.writeNote(path, writtenBody, { baseVersion: content.version })
+        const meta = content.version === undefined
+          ? await window.zen.writeNote(path, writtenBody)
+          : await window.zen.writeNote(path, writtenBody, { baseVersion: content.version })
         if (!isCurrent()) return
         // Saving a Typst preamble note changes the definitions every note tagged
         // for it compiles against, so reload and repaint open panes. (#486)
@@ -11293,8 +11292,8 @@ export const useStore = create<Store>((set, get) => {
 
     try {
       if (appInfo.runtime === 'web' && !capabilities.supportsLocalFilesystemPickers) {
-        const serverCapabilities = await window.zen.getServerCapabilities()
-        if (!(await ensureWebServerSession(serverCapabilities))) return
+        if (!(await ensureWebServerSession())) return
+        await window.zen.getServerCapabilities()
         const current = await window.zen.getCurrentVault()
         const enteredPath = await pickServerDirectoryApp(
           {

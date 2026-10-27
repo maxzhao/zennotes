@@ -52,10 +52,16 @@ export function DatabaseView({
   // Only `.base` databases rename by title (a legacy loose `.csv` doesn't).
   const canRenameTitle = !!csvPath && !!formDirFromCsvPath(csvPath)
 
+  const attempted = useRef<{ vault: typeof vault; path: string } | null>(null)
   const transitioning = useStore(s => s.workspaceTransitioning)
   useEffect(() => {
-    if (csvPath && !doc && !loading && !transitioning) void loadDatabase(csvPath)
-  }, [csvPath, doc, loading, loadDatabase, transitioning])
+    if (!csvPath || doc || loading || transitioning || locked) return
+    if (attempted.current?.vault === vault && attempted.current.path === csvPath) return
+    // Loading=false after a failure is not a request to retry. Retry only on
+    // a new resource/workspace, or the user's explicit Retry action.
+    attempted.current = { vault, path: csvPath }
+    void loadDatabase(csvPath)
+  }, [csvPath, doc, loading, loadDatabase, transitioning, locked, vault])
 
   if (!csvPath) {
     return (
@@ -67,7 +73,7 @@ export function DatabaseView({
   if (!doc) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-ink-500">
-        {loading ? 'Loading database…' : 'Opening…'}
+        {loading || transitioning || attempted.current?.vault !== vault || attempted.current?.path !== csvPath ? 'Loading database…' : <div role="alert">Could not open database. <Button onClick={() => void loadDatabase(csvPath)}>Retry</Button></div>}
       </div>
     )
   }

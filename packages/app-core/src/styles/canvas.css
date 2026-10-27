@@ -185,3 +185,8 @@
     overflow: auto;
   }
 }
+
+/* Toolbar occupies layout space; fitView measures only the unobscured flow. */
+.zn-canvas { display: flex; flex-direction: column; }
+.zn-canvas > .react-flow { flex: 1; min-height: 0; height: auto; }
+.zn-canvas-toolbar { position: relative; left: auto; right: auto; top: auto; margin: 8px; flex-shrink: 0; }
