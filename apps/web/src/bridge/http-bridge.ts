@@ -1,3 +1,4 @@
+import { VersionConflictError, type WriteOptions, type LinkReference, type TranslationResult } from '@zennotes/bridge-contract/maxa'
 /**
  * HTTP/WebSocket implementation of the `window.zen` API.
  *
@@ -202,6 +203,9 @@ async function jsonRequest<T>(
       )
     }
     const text = await res.text().catch(() => '')
+    // Relocation may have committed before a reference rewrite failed.
+    // Re-pull the actual state, but still reject with the unrewritten files.
+    if (res.status === 500 && text.includes('REWRITE_FAILED')) dispatchVaultChange(RESYNC_EVENT)
     // A 404 for a path this app asked to change means the list is behind the
     // server: another device moved, renamed, or trashed the note and the
     // change feed did not carry it here (#734). Name the path and re-pull.
@@ -453,11 +457,32 @@ function writeNoteComments(
   })
 }
 
-function writeNote(relPath: string, body: string): Promise<NoteMeta> {
-  return jsonRequest<NoteMeta>('/notes/write', {
-    method: 'POST',
-    body: { path: relPath, body }
-  })
+async function writeNote(relPath: string, body: string, options?: WriteOptions): Promise<NoteMeta> {
+  // Full-buffer callers supply their original read version. Legacy callers
+  // still use a conditional write; never silently request legacy overwrite.
+  const baseVersion = options?.baseVersion ?? (await readNote(relPath)).version
+  if (baseVersion === undefined) throw new Error('Server did not return a note version; upgrade the fork server before saving.')
+  try {
+    return await jsonRequest<NoteMeta>('/notes/write', {
+      method: 'POST', body: { path: relPath, body, baseVersion, ...(options?.force ? { force: true } : {}) }
+    })
+  } catch (err) {
+    if (err instanceof HttpRequestError && err.status === 409) {
+      const conflict = JSON.parse(err.body)
+      if (conflict.code === 'VERSION_CONFLICT') throw new VersionConflictError(relPath, conflict.version, conflict.body)
+    }
+    throw err
+  }
+}
+function getLinks(kind: 'outgoing' | 'backlinks' | 'unresolved', path?: string): Promise<LinkReference[]> {
+  return jsonRequest<LinkReference[]>('/links/' + kind + (path ? '?path=' + encodeURIComponent(path) : ''))
+}
+function getOrphans(): Promise<{ path: string }[]> { return jsonRequest('/links/orphans') }
+function translateNote(path: string): Promise<TranslationResult> {
+  return jsonRequest('/translate', { method: 'POST', body: { path } })
+}
+function createCanvas(folder: NoteFolder, title?: string, subpath?: string): Promise<NoteMeta> {
+  return jsonRequest('/canvas/create', { method: 'POST', body: { folder, title, subpath } })
 }
 
 async function appendToNote(
@@ -465,6 +490,7 @@ async function appendToNote(
   body: string,
   position: 'start' | 'end'
 ): Promise<NoteMeta> {
+  for (let attempt = 0; attempt < 3; attempt++) {
   const current = await readNote(relPath)
   const trimmed = body.replace(/\s+$/u, '')
   if (!trimmed) return current
@@ -472,7 +498,10 @@ async function appendToNote(
     position === 'end'
       ? `${current.body}${current.body.endsWith('\n') ? '' : '\n'}\n${trimmed}\n`
       : `${trimmed}\n\n${current.body}`
-  return await writeNote(relPath, next)
+  try { return await writeNote(relPath, next, { baseVersion: current.version }) }
+  catch (err) { if (!(err instanceof VersionConflictError) || attempt === 2) throw err }
+  }
+  throw new Error('Note kept changing; append was not saved.')
 }
 
 function createNote(
@@ -1457,6 +1486,7 @@ function clipboardReadText(): string {
 // --------------------------------------------------------------------
 
 export const httpBridge: ZenBridge = {
+  getLinks, getOrphans, translateNote, createCanvas,
   // Workflows and custom templates are the capabilities the SERVER decides;
   // derive them from the cached /capabilities response instead of mutating
   // the const in place, so the UI gate (this) and the request gates

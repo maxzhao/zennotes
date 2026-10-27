@@ -644,6 +644,8 @@ export function normalizeVaultSettings(
   )
 
   return {
+    excludedPaths: settings?.excludedPaths ?? [],
+    projectPathPrefix: settings?.projectPathPrefix ?? "",
     primaryNotesLocation,
     dailyNotes: {
       enabled: !!settings?.dailyNotes?.enabled,
@@ -779,7 +781,7 @@ export function resolveFavoriteItems(
         kind: 'note',
         key,
         path: note.path,
-        title: note.title,
+        title: note.displayTitle || note.title,
         isDrawing: isExcalidrawPath(note.path)
       })
     }

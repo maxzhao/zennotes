@@ -1,3 +1,4 @@
+import type { LinkReference, WriteOptions, TranslationResult } from './maxa.js'
 import type { ZenPlatform } from './platform.js'
 import type {
   AppUpdateState,
@@ -385,7 +386,11 @@ export interface ZenBridge {
   /** Create a record's "page" note (returns its vault-relative path). */
   createRecordPage(csvPath: string, title: string, body: string): Promise<string>
   listDatabases(): Promise<DatabaseSummary[]>
-  writeNote(relPath: string, body: string): Promise<NoteMeta>
+  getLinks?(kind: "outgoing" | "backlinks" | "unresolved", path?: string): Promise<LinkReference[]>
+  getOrphans?(): Promise<{ path: string }[]>
+  translateNote?(path: string): Promise<TranslationResult>
+  createCanvas?(folder: NoteFolder, title?: string, subpath?: string): Promise<NoteMeta>
+  writeNote(relPath: string, body: string, options?: WriteOptions): Promise<NoteMeta>
   appendToNote(relPath: string, body: string, position: 'start' | 'end'): Promise<NoteMeta>
   createNote(folder: NoteFolder, title?: string, subpath?: string): Promise<NoteMeta>
   /** Create a new `.excalidraw` drawing seeded with an empty scene. */

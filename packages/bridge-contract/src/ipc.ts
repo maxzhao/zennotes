@@ -559,6 +559,8 @@ export interface VaultViewSettings {
 }
 
 export interface VaultSettings {
+  excludedPaths?: string[]
+  projectPathPrefix?: string
   /**
    * The name the vault goes by in the app (#692): the sidebar header, the
    * vault switcher, the title bar, the CLI's vault list. Absent means the
@@ -677,6 +679,11 @@ export const DEFAULT_VAULT_SETTINGS: VaultSettings = {
 }
 
 export interface NoteMeta {
+  displayTitle?: string
+  aliases?: string[]
+  type?: "note" | "excalidraw" | "canvas"
+  version?: string
+  changedFiles?: string[]
   /** Path relative to the vault root, always POSIX-style. */
   path: string
   /** File name without extension. */
