@@ -1,3 +1,4 @@
+import { canvasSize } from './canvas-geometry'
 // JSON Canvas 1.0: the stored document is the authority. UI projections must
 // never replace it with React Flow's own node/edge objects.
 export type CanvasSide = 'top' | 'right' | 'bottom' | 'left'
@@ -71,17 +72,27 @@ export function parseCanvas(raw: string): CanvasDocument {
   return doc
 }
 export function serializeCanvas(doc: CanvasDocument): string {
-  return JSON.stringify(doc, null, 2) + '\n'
+  const safe = doc.nodes
+    ? { ...doc, nodes: doc.nodes.map((n) => ({ ...n, ...canvasSize(n.width, n.height) })) }
+    : doc
+  return JSON.stringify(safe, null, 2) + '\n'
 }
 export function patchCanvasNode(
   doc: CanvasDocument,
   id: string,
   patch: Partial<CanvasNode>
 ): CanvasDocument {
-  const next = { ...patch }
-  for (const k of ['x', 'y', 'width', 'height'] as const)
-    if (typeof next[k] === 'number') next[k] = Math.round(next[k]!)
-  return { ...doc, nodes: doc.nodes?.map((n) => (n.id === id ? { ...n, ...next } : n)) }
+  return {
+    ...doc,
+    nodes: doc.nodes?.map((n) => {
+      if (n.id !== id) return n
+      const next = { ...n, ...patch }
+      for (const key of ['x', 'y'] as const)
+        if (typeof patch[key] === 'number')
+          next[key] = Number.isFinite(patch[key]) ? Math.round(patch[key]!) : n[key]
+      return { ...next, ...canvasSize(next.width, next.height, n) }
+    })
+  }
 }
 export function containedNodes(group: CanvasNode, nodes: CanvasNode[]): CanvasNode[] {
   return nodes.filter(

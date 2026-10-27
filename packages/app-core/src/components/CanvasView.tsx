@@ -1,3 +1,9 @@
+import {
+  lockCanvasAxis,
+  resizeCanvasRect,
+  type CanvasAxis,
+  type ResizeHandle
+} from '../lib/canvas-geometry'
 import { paintCanvasEdges } from '../lib/canvas-export'
 import { parseOutline } from '../lib/outline'
 import { parseBlockAnchors } from '../lib/block-anchors'
@@ -18,8 +24,8 @@ import {
   Background,
   Handle,
   Position,
-  NodeResizer,
   useReactFlow,
+  useViewport,
   applyNodeChanges,
   type Node,
   type NodeProps,
@@ -64,7 +70,7 @@ interface CardContext {
   resizeEnd: () => void
   resizeStart: () => void
   snapObjects: boolean
-  shift: boolean
+  snapGrid: boolean
   reloads: Record<string, number>
 }
 const Cards = createContext<CardContext>(null!)
@@ -85,6 +91,14 @@ function CanvasCard({ data, selected }: NodeProps<FlowCard>): JSX.Element {
   const ctx = useContext(Cards),
     card = data.card
   const displayTitle = useStore((s) => s.notes.find((n) => n.path === card.file)?.displayTitle)
+  const flow = useReactFlow()
+  const { zoom } = useViewport()
+  const resize = useRef<{
+    pointerId: number
+    handle: ResizeHandle
+    from: { x: number; y: number }
+    card: CanvasNode
+  } | null>(null)
   const editing = ctx.editing === card.id && !ctx.readonly
   const isGroup = card.type === 'group'
   const style = {
@@ -106,22 +120,72 @@ function CanvasCard({ data, selected }: NodeProps<FlowCard>): JSX.Element {
       className={`zn-canvas-card ${isGroup ? 'zn-canvas-group' : ''} ${selected ? 'is-selected' : ''}`}
       style={style}
     >
-      <NodeResizer
-        isVisible={selected && !ctx.readonly}
-        minWidth={80}
-        minHeight={60}
-        keepAspectRatio={ctx.shift}
-        onResizeStart={ctx.resizeStart}
-        onResizeEnd={ctx.resizeEnd}
-        onResize={(_, params) =>
-          ctx.patch(card.id, {
-            x: params.x,
-            y: params.y,
-            width: params.width,
-            height: params.height
-          })
-        }
-      />
+      {selected &&
+        !ctx.readonly &&
+        (
+          [
+            'top',
+            'right',
+            'bottom',
+            'left',
+            'top-left',
+            'top-right',
+            'bottom-left',
+            'bottom-right'
+          ] as ResizeHandle[]
+        ).map((handle) => (
+          <div
+            key={handle}
+            aria-label={'Resize ' + handle}
+            style={handle.includes('-') ? { scale: 1 / zoom } : undefined}
+            className={
+              'react-flow__resize-control nodrag nopan ' +
+              handle.replace('-', ' ') +
+              (handle.includes('-') ? ' handle' : ' line')
+            }
+            onPointerDown={(event) => {
+              if (event.button !== 0) return
+              event.preventDefault()
+              event.stopPropagation()
+              resize.current = {
+                pointerId: event.pointerId,
+                handle,
+                from: flow.screenToFlowPosition({ x: event.clientX, y: event.clientY }),
+                card: { ...card }
+              }
+              event.currentTarget.setPointerCapture(event.pointerId)
+              ctx.resizeStart()
+            }}
+            onPointerMove={(event) => {
+              const active = resize.current
+              if (!active || active.pointerId !== event.pointerId) return
+              event.preventDefault()
+              event.stopPropagation()
+              const point = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+              const delta = { x: point.x - active.from.x, y: point.y - active.from.y }
+              if (ctx.snapGrid) {
+                delta.x = Math.round(delta.x / 20) * 20
+                delta.y = Math.round(delta.y / 20) * 20
+              }
+              const rect = resizeCanvasRect(active.card, active.handle, delta, event.shiftKey)
+              ctx.patch(card.id, { ...rect })
+            }}
+            onPointerUp={(event) => {
+              if (resize.current?.pointerId !== event.pointerId) return
+              event.stopPropagation()
+              resize.current = null
+              ctx.resizeEnd()
+              if (event.currentTarget.hasPointerCapture(event.pointerId))
+                event.currentTarget.releasePointerCapture(event.pointerId)
+            }}
+            onPointerCancel={(event) => {
+              if (resize.current?.pointerId === event.pointerId) {
+                resize.current = null
+                ctx.resizeEnd()
+              }
+            }}
+          />
+        ))}
       <header
         onClick={(e) => {
           if (card.type === 'link' && (e.ctrlKey || e.metaKey) && safeWebUrl(card.url)) {
@@ -400,8 +464,8 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
   const [touch, setTouch] = useState(false)
   const [snapGrid, setSnapGrid] = useState(true),
     [snapObjects, setSnapObjects] = useState(true),
-    [space, setSpace] = useState(false),
-    [shift, setShift] = useState(false)
+    [space, setSpace] = useState(false)
+  const shiftHeld = useRef(false)
   const [menu, setMenu] = useState<{
     x: number
     y: number
@@ -429,6 +493,7 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
     contained: Set<string>
     duplicates?: Map<string, string>
     groupId?: string
+    axis?: CanvasAxis
     origin?: { x: number; y: number }
   } | null>(null)
   const host = useRef<HTMLDivElement>(null),
@@ -544,9 +609,7 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
         return next
       })
     if (locked) return
-    const moved = changes.filter(
-      (c) => c.type === 'position' || (c.type === 'dimensions' && c.resizing)
-    )
+    const moved = changes.filter((c) => c.type === 'position')
     if (!moved.length) return
     const mapped = moved.map((c) =>
       'id' in c && gesture.current?.duplicates?.has(c.id)
@@ -569,10 +632,6 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
       let { x, y } = p.position
       const g = gesture.current,
         start = g?.positions.get(p.id)
-      if (shift && start) {
-        if (Math.abs(x - start.x) > Math.abs(y - start.y)) y = start.y
-        else x = start.x
-      }
       if (
         snapObjects &&
         !space &&
@@ -588,11 +647,27 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
               y = other.y + other.height - original.height
           }
       }
+      const finishing = mapped.some(
+        (c) => c.type === 'position' && c.id === p.id && c.dragging === false
+      )
+      if (g && start && (shiftHeld.current || (finishing && g.axis))) {
+        // Pick the dominant axis from actual movement, not an object snap.
+        // Initial zero-delta notifications must not lock a vertical drag to X.
+        if (!g.axis && p.position.x === start.x && p.position.y === start.y) {
+          x = start.x
+          y = start.y
+        } else {
+          const axis = g.axis ?? lockCanvasAxis(start, p.position).axis
+          const locked = lockCanvasAxis(start, { x, y }, axis)
+          g.axis = locked.axis
+          x = locked.position.x
+          y = locked.position.y
+        }
+      } else if (g) g.axis = undefined
       if (mapped.some((c) => 'id' in c && c.id === p.id))
         next = patchCanvasNode(next, p.id, {
           x,
-          y,
-          ...(p.measured?.width ? { width: p.measured.width, height: p.measured.height } : {})
+          y
         })
     }
     const g = gesture.current
@@ -1083,6 +1158,7 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
   })
   const keyboard = (event: KeyboardEvent): void => {
     if (embedded) return
+    if (event.key === 'Shift') shiftHeld.current = event.type === 'keydown'
     const target = event.target as HTMLElement
     if (target.closest('input,textarea,[contenteditable=true],.cm-editor')) return
     if (!host.current?.contains(target) && useStore.getState().selectedPath !== path) return
@@ -1090,7 +1166,6 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
       setSpace(event.type === 'keydown')
       if (event.type === 'keydown') event.preventDefault()
     }
-    if (event.key === 'Shift') setShift(event.type === 'keydown')
     if (event.type !== 'keydown') return
     const mod = event.ctrlKey || event.metaKey
     if (mod && event.key.toLowerCase() === 'a') {
@@ -1121,14 +1196,20 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
     }
   }
   useEffect(() => {
+    const pointerModifiers = (e: MouseEvent): void => {
+      shiftHeld.current = e.shiftKey
+      if (!e.shiftKey && gesture.current) gesture.current.axis = undefined
+    }
+    window.addEventListener('mousemove', pointerModifiers, true)
     window.addEventListener('keydown', keyboard, true)
     window.addEventListener('keyup', keyboard, true)
     const blur = (): void => {
       setSpace(false)
-      setShift(false)
+      shiftHeld.current = false
     }
     window.addEventListener('blur', blur)
     return () => {
+      window.removeEventListener('mousemove', pointerModifiers, true)
       window.removeEventListener('keydown', keyboard, true)
       window.removeEventListener('keyup', keyboard, true)
       window.removeEventListener('blur', blur)
@@ -1152,7 +1233,9 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
     setTouch(e.pointerType === 'touch')
     if (
       e.pointerType !== 'touch' ||
-      (e.target as HTMLElement).closest('input,textarea,button,select,a,iframe,audio,video')
+      (e.target as HTMLElement).closest(
+        'input,textarea,button,select,a,iframe,audio,video,.react-flow__resize-control'
+      )
     )
       return
     stopLongPress()
@@ -1298,7 +1381,7 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
         resizeStart: begin,
         resizeEnd: end,
         snapObjects,
-        shift,
+        snapGrid: snapGrid && !space,
         reloads
       }}
     >
@@ -1569,6 +1652,7 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
           }}
           onNodeDoubleClick={(_, n) => edit(n.id)}
           onNodeDragStart={(event, n) => {
+            shiftHeld.current = event.shiftKey
             begin()
             const source = docRef.current.nodes?.find((c) => c.id === n.id)
             if (event.altKey) {
