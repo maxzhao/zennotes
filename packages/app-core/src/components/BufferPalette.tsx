@@ -201,12 +201,12 @@ function buildEntries(deps: BuildDeps): BufferEntry[] {
 
     const meta =
       deps.noteContents[path] ?? deps.notes.find((note) => note.path === path) ?? null
-    const title = meta?.title?.trim() || fallbackTitle(path)
+    const title = meta?.displayTitle?.trim() || meta?.title?.trim() || fallbackTitle(path)
     entries.push({
       path,
       title,
       subtitle: meta ? noteFolderLabel(meta, deps.vaultSettings) || meta.folder : parentDir(path),
-      keywords: [title, path, meta?.folder].filter(Boolean).join(' '),
+      keywords: [title, meta?.title, ...(meta?.aliases ?? []), path, meta?.folder].filter(Boolean).join(' '),
       badge,
       current: isCurrent,
       dirty: deps.noteDirty[path] ?? false,

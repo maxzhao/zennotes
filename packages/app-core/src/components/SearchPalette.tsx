@@ -344,7 +344,7 @@ export function SearchPalette(): JSX.Element {
                       of the main notes area has no folder to show and keeps its
                       area label. */}
                   <span className="min-w-0 truncate text-sm font-medium text-ink-900">
-                    {n.title}
+                    {n.displayTitle || n.title}
                   </span>
                   {dir ? (
                     <span

@@ -1,3 +1,4 @@
+import { useServerLinks } from '../lib/server-links'
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../store";
 import type { NoteContent, NoteMeta } from "@shared/ipc";
@@ -47,10 +48,13 @@ export function StatusBar({ note }: { note: NoteContent | null }): JSX.Element {
   // (#880). Keying the memo on `note.path` (instead of the whole `note`
   // object, which changes on every keystroke) keeps even that lookup off the
   // typing hot path while producing an identical count.
-  const backlinks = useMemo(() => {
+  const serverBacklinks = useServerLinks("backlinks", note?.path)
+  const localBacklinks = useMemo(() => {
     if (!note) return 0;
     return backlinksForNote(notes as NoteMeta[], note).length;
   }, [note?.path, notes]);
+
+  const backlinks = window.zen?.getLinks ? (serverBacklinks.error ? "?" : new Set(serverBacklinks.links.filter((r) => r.source !== note?.path).map((r) => r.source)).size) : localBacklinks
 
   // The target of the link the mouse is over (browser-style), shown on the left.
   const hoveredLink = useHoveredLinkStore((s) => s.href);

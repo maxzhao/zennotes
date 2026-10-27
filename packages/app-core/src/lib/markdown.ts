@@ -105,6 +105,10 @@ function sanitizeRenderedHtml(html: string): string {
 
 function remarkWikilinks() {
   function buildWikilinkNode(bang: string, target: string, label: string): AnyNode {
+    if (bang === '!' && /\.canvas(?:#.*)?$/i.test(target)) {
+      const safeTarget = target.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+      return { type: 'html', value: '<div class="canvas-embed-host" data-canvas-embed="' + safeTarget + '"></div>' }
+    }
     const assetKind = classifyLocalAssetHref(target)
     if (bang === '!' && assetKind === 'image') {
       return {

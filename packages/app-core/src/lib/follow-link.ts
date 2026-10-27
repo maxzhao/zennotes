@@ -1,3 +1,4 @@
+import { followServerLink } from './server-links'
 import { followApplicationLink } from './application-link-open'
 import { useStore } from '../store'
 import { createNoteFromLinkNow, offerCreateNoteFromLink } from './create-note-from-link'
@@ -31,6 +32,7 @@ import {
  */
 export interface FollowLinkOptions {
   createWithoutAsking?: boolean
+  sourcePath?: string
   kind?: LineLinkKind
 }
 
@@ -42,6 +44,10 @@ export function followLinkTarget(target: string, options: FollowLinkOptions = {}
     return true
   }
   const state = useStore.getState()
+  if (window.zen?.getLinks && (options.sourcePath || state.selectedPath)) {
+    void followServerLink(target, options.sourcePath || state.selectedPath!, options.kind === "wikilink" ? "wikilink" : "markdown")
+    return true
+  }
   const focusSoon = (): void => {
     state.setFocusedPanel('editor')
     requestAnimationFrame(() => useStore.getState().editorViewRef?.focus())

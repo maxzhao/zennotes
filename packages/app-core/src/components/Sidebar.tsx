@@ -1,3 +1,6 @@
+import { createCanvas } from '../lib/canvas-actions'
+import { translateNote } from '../lib/maxa-panels'
+import { RecentView } from './MaxaPanels'
 import { runNoteLifecycleAction, runNoteBatchAction, runEmptyTrash } from "../lib/note-lifecycle-actions";
 import {
   createContext,
@@ -1864,6 +1867,7 @@ export function Sidebar(): JSX.Element {
       });
     }
     items.push(
+      { label: "New canvas", disabled: !window.zen.createCanvas, onSelect: () => createCanvas(folder, subpath) },
       {
         label: "New note",
         onSelect: async () => {
@@ -2138,6 +2142,7 @@ export function Sidebar(): JSX.Element {
   // Items for the empty-area (vault root) context menu.
   const rootMenuItems = useMemo<ContextMenuItem[]>(
     () => [
+      { label: "New canvas", disabled: !window.zen.createCanvas, onSelect: () => createCanvas() },
       {
         label: "New note",
         onSelect: async () => {
@@ -2211,6 +2216,7 @@ export function Sidebar(): JSX.Element {
       });
     }
     if (n.folder !== "trash") {
+      if (window.zen.translateNote) items.push({ label: "Translate", onSelect: () => translateNote(n.path) });
       const isFav = vaultSettings.favorites.includes(n.path);
       items.push({
         label: isFav ? "Remove from Favorites" : "Add to Favorites",
@@ -3110,6 +3116,8 @@ export function Sidebar(): JSX.Element {
           </IconBtn>
         </div>
       </div>
+
+      <RecentView compact />
 
       {/* Search + toolbar on one row. flex-wrap: on a narrow sidebar the
        *  icon strip drops to its own line under the search field instead of
@@ -5305,7 +5313,7 @@ const NoteLeaf = memo(function NoteLeaf({
         )}
       </SidebarGlyph>
       <span className={["flex-1 truncate", colorClass].filter(Boolean).join(" ")}>
-        {note.title}
+        {note.displayTitle || note.title}
       </span>
       {note.isSymlink && (
         <span
@@ -5376,7 +5384,7 @@ const NoteLeaf = memo(function NoteLeaf({
 function areNoteLeafPropsEqual(prev: NoteLeafProps, next: NoteLeafProps): boolean {
   return (
     prev.note.path === next.note.path &&
-    prev.note.title === next.note.title &&
+    prev.note.displayTitle === next.note.displayTitle && prev.note.title === next.note.title &&
     prev.note.hasAttachments === next.note.hasAttachments &&
     prev.note.isSymlink === next.note.isSymlink &&
     prev.depth === next.depth &&

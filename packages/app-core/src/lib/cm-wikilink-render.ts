@@ -1,3 +1,4 @@
+import { followServerLink } from './server-links'
 /**
  * WYSIWYG rendering for Obsidian-style `[[wikilinks]]`: hide the `[[ ]]`
  * brackets (and the `target|` part of an aliased link), show the label as a
@@ -258,6 +259,7 @@ export function openWikilink(
   options: { createWithoutAsking?: boolean } = {}
 ): void {
   const state = useStore.getState()
+  if (window.zen?.getLinks && state.selectedPath) { void followServerLink(target, state.selectedPath, "wikilink"); return }
   const focusEditorSoon = (): void => {
     useStore.getState().setFocusedPanel('editor')
     requestAnimationFrame(() => useStore.getState().editorViewRef?.focus())

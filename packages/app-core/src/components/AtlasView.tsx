@@ -109,7 +109,7 @@ export function AtlasView(): JSX.Element {
   const filterRef = useRef<HTMLInputElement | null>(null)
 
   const graph: AtlasGraph = useMemo(() => {
-    const g = buildAtlasGraph(notes)
+    const g = buildAtlasGraph(window.zen?.getLinks ? notes.map((n) => ({ ...n, wikilinks: [] })) : notes)
     let previous: AtlasPositions | null = null
     const cacheKey = `zen-atlas-pos:${vaultRoot}`
     try {
@@ -198,6 +198,18 @@ export function AtlasView(): JSX.Element {
     let cancelled = false
     const cacheKey = `zen-atlas-mdlinks:${vaultRoot}`
     const run = async (): Promise<void> => {
+      if (window.zen?.getLinks) {
+        try {
+          const refs = await Promise.all(graph.nodes.map((n) => window.zen?.getLinks!('outgoing', n.path)))
+          if (cancelled) return
+          const pairs: Array<[string, string]> = refs.flat().filter((r) => r.status === 'resolved' && r.path).map((r) => [r.source, r.path!])
+          applyExtraLinkEdges(graph, pairs)
+          layoutAtlas(graph, collectAtlasPositions(graph))
+          world.current.betweenness = null
+          setEdgeVersion((v) => v + 1)
+        } catch (e) { if (!cancelled) setStatus(String(e)) }
+        return
+      }
       let cache: Record<string, { u: number; t: string[] }> = {}
       try {
         cache = JSON.parse(localStorage.getItem(cacheKey) ?? '{}')

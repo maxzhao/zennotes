@@ -1,3 +1,4 @@
+import { ServerUnresolvedLinksView } from './ServerLinksView'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { NoteMeta } from '@shared/ipc'
 import {
@@ -69,7 +70,8 @@ function excerpt(occurrence: WikilinkOccurrence): { before: string; link: string
   return { before: clippedBefore, link: text.slice(start, end), after: text.slice(end) }
 }
 
-export function UnresolvedLinksView(): JSX.Element {
+export function UnresolvedLinksView(): JSX.Element { return window.zen?.getLinks ? <ServerUnresolvedLinksView /> : <LegacyUnresolvedLinksView /> }
+function LegacyUnresolvedLinksView(): JSX.Element {
   const notes = useStore((s) => s.notes)
   const folders = useStore((s) => s.folders)
   const vaultSettings = useStore((s) => s.vaultSettings)

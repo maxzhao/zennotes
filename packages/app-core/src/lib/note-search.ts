@@ -29,8 +29,8 @@ export function buildNoteSearchIndex(notes: NoteMeta[]): NoteSearchEntry[] {
     const tagsLower = note.tags.map((tag) => tag.toLowerCase())
     return {
       note,
-      title: note.title,
-      titleLower: note.title.toLowerCase(),
+      title: note.displayTitle || note.title,
+      titleLower: [note.displayTitle, note.title, ...(note.aliases ?? [])].filter(Boolean).join(" ").toLowerCase(),
       path: note.path,
       pathLower: note.path.toLowerCase(),
       excerpt: note.excerpt,

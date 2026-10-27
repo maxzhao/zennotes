@@ -116,7 +116,7 @@ function matchesNote(note: NoteMeta, query: string): boolean {
   const q = normalize(query)
   if (!q) return true
 
-  const title = normalize(note.title)
+  const title = normalize([note.displayTitle, note.title, ...(note.aliases ?? [])].filter(Boolean).join(" "))
   const path = normalize(stripMdExtension(note.path))
   const compactTitle = compact(note.title)
   const compactPath = compact(stripMdExtension(note.path))
@@ -206,7 +206,7 @@ function scoreAsset(asset: AssetMeta, query: string, activePath: string | null):
 }
 
 function scoreNote(note: NoteMeta, query: string, activePath: string | null): number {
-  const title = normalize(note.title)
+  const title = normalize([note.displayTitle, note.title, ...(note.aliases ?? [])].filter(Boolean).join(" "))
   const path = normalize(stripMdExtension(note.path))
   const q = normalize(query)
   let score = 0
@@ -318,7 +318,7 @@ export function linkCandidates(query: string, ctx: LinkCandidateContext): LinkCa
     .filter((note) => matchesNote(note, query))
     .map((note) => ({
       kind: 'note' as const,
-      label: note.title,
+      label: note.displayTitle || note.title,
       subtitle: noteSubtitle(note, ctx.vaultSettings),
       target: noteLinkTarget(note, notes, ctx.vaultSettings),
       score: scoreNote(note, query, activePath),

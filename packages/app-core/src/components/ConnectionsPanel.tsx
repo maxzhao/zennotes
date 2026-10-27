@@ -1,3 +1,4 @@
+import { useServerLinks } from '../lib/server-links'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { NoteContent, NoteMeta } from '@shared/ipc'
 import { useStore } from '../store'
@@ -7,6 +8,7 @@ import {
   extractMarkdownLinkHrefs,
   extractMentionSnippet,
   parseCreateNotePath,
+  suggestCreateNotePath,
   resolveWikilinkTarget
 } from '../lib/wikilinks'
 import { resolveInternalNoteHref } from '../lib/internal-links'
@@ -30,6 +32,8 @@ interface BacklinkItem {
 }
 
 interface MissingLinkItem {
+  ambiguous?: boolean
+  candidates?: string[]
   target: string
   suggestedPath: string
 }
@@ -43,6 +47,9 @@ export function ConnectionsPanel({
    *  chose; see lib/side-panel-fit. (#805) */
   fitWidth?: number
 }): JSX.Element {
+  const serverOut = useServerLinks("outgoing", note.path)
+  const serverBack = useServerLinks("backlinks", note.path)
+  const server = !!window.zen?.getLinks
   const notes = useStore((s) => s.notes)
   const selectNote = useStore((s) => s.selectNote)
   const createAndOpen = useStore((s) => s.createAndOpen)
@@ -102,7 +109,21 @@ export function ConnectionsPanel({
     })
   }
 
-  const outgoing = useMemo(() => {
+  const outgoing = useMemo<{ resolvedItems: NoteMeta[]; attachmentItems: AttachmentLink[]; missingItems: MissingLinkItem[] }>(() => {
+    if (server) {
+      const seen = new Set<string>(), resolvedItems: NoteMeta[] = [], attachmentItems: AttachmentLink[] = [], missingItems: MissingLinkItem[] = []
+      for (const ref of serverOut.links) {
+        const key = ref.path ?? ref.raw
+        if (seen.has(key)) continue
+        seen.add(key)
+        if (ref.status === 'resolved' && ref.path) {
+          const target = notes.find((n) => n.path === ref.path)
+          if (target) resolvedItems.push(target)
+          else attachmentItems.push({ target: ref.raw, assetPath: ref.path })
+        } else missingItems.push({ target: ref.raw, suggestedPath: suggestCreateNotePath(ref.raw), ambiguous: ref.status === 'ambiguous', candidates: ref.candidates })
+      }
+      return { resolvedItems, attachmentItems, missingItems }
+    }
     const links = classifyOutgoingWikilinks({
       body: note.body,
       notePath: note.path,
@@ -121,7 +142,7 @@ export function ConnectionsPanel({
       if (target && target.folder !== 'trash') resolvedItems.push(target)
     }
     return { resolvedItems, attachmentItems: links.attachments, missingItems: links.missing }
-  }, [assetFiles, note.body, note.path, note.title, notes])
+  }, [assetFiles, note.body, note.path, note.title, notes, server, serverOut.links])
 
   const totalRows =
     outgoing.resolvedItems.length +
@@ -150,6 +171,7 @@ export function ConnectionsPanel({
   }
 
   const handleCreateMissingLink = async (item: MissingLinkItem): Promise<void> => {
+    if (item.ambiguous) return
     const value = await promptApp({
       title: `Create note for "${item.target}"?`,
       description:
@@ -201,7 +223,7 @@ export function ConnectionsPanel({
         try {
           const content = await window.zen.readNote(candidate.path)
           const targets = extractWikilinkTargets(content.body)
-          const linksHere =
+          const linksHere = server ? serverBack.links.some((r) => r.source === candidate.path) :
             targets.some(
               (target) => resolveWikilinkTarget(notes, target)?.path === note.path
             ) ||
@@ -216,7 +238,7 @@ export function ConnectionsPanel({
             // Which block ids this note reached for, so the row can say so.
             // Only backlink rows render them, so only those pay for the
             // per-target resolution. (#601)
-            blocks: linksHere ? blockAnchorsTargeting(notes, targets, note.path) : [],
+            blocks: linksHere ? server ? [...new Set(serverBack.links.filter((r) => r.source === candidate.path && r.anchor.startsWith("#^")).map((r) => r.anchor.slice(2)))] : blockAnchorsTargeting(notes, targets, note.path) : [],
             mentionSnippet: snippet
           }
         } catch {
@@ -242,7 +264,7 @@ export function ConnectionsPanel({
     return () => {
       cancelled = true
     }
-  }, [note.path, note.title, notes, setConnectionPreview])
+  }, [note.path, note.title, notes, setConnectionPreview, server, serverBack.links])
 
   useEffect(() => {
     return () => cancelScheduledClose()
@@ -277,6 +299,7 @@ export function ConnectionsPanel({
           <div className="text-xs font-medium uppercase tracking-[0.16em] text-ink-400">
             Connections
           </div>
+          {(serverOut.error || serverBack.error) && <p role="alert">{serverOut.error || serverBack.error}</p>}
           <div className="mt-2 flex items-center gap-2 text-xs text-ink-500">
             <Pill>
               {outgoing.resolvedItems.length +
@@ -336,6 +359,8 @@ export function ConnectionsPanel({
                 key={item.target.toLowerCase()}
                 target={item.target}
                 suggestedPath={item.suggestedPath}
+                ambiguous={item.ambiguous}
+                candidates={item.candidates}
                 onCreate={() => void handleCreateMissingLink(item)}
                 active={isConnectionsFocused && connectionsCursorIndex === rowIndex}
                 rowIndex={rowIndex++}
@@ -501,7 +526,7 @@ function ConnectionRow({
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <div className={['truncate text-sm font-medium', active ? 'text-white' : 'text-ink-900'].join(' ')}>
-            {note.title}
+            {note.displayTitle || note.title}
           </div>
           <div className={['mt-0.5 truncate text-xs', active ? 'text-white/75' : 'text-ink-500'].join(' ')}>
             {note.path}
@@ -594,12 +619,16 @@ function MissingConnectionRow({
   target,
   suggestedPath,
   onCreate,
+  ambiguous,
+  candidates,
   active,
   rowIndex
 }: {
   target: string
   suggestedPath: string
   onCreate: () => void
+  ambiguous?: boolean
+  candidates?: string[]
   active: boolean
   rowIndex: number
 }): JSX.Element {
@@ -608,6 +637,7 @@ function MissingConnectionRow({
     <button
       type="button"
       onClick={onCreate}
+      disabled={ambiguous}
       data-connections-idx={rowIndex}
       data-connections-type="missing"
       data-connections-target={target}
@@ -634,11 +664,11 @@ function MissingConnectionRow({
             active ? 'bg-white/12 text-white/80' : 'bg-amber-500/12 text-amber-200'
           ].join(' ')}
         >
-          create
+          {ambiguous ? "ambiguous" : "create"}
         </span>
       </div>
       <div className={['mt-2 line-clamp-2 text-xs leading-5', active ? 'text-white/85' : 'text-ink-600'].join(' ')}>
-        No note resolves this wikilink yet. Click to create it.
+        {ambiguous ? `Ambiguous: ${candidates?.join(", ")}. Use an explicit path.` : "No note resolves this link yet. Click to create it."}
       </div>
       {active && vimMode && (
         <div className="mt-2 flex justify-end">

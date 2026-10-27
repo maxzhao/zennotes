@@ -123,7 +123,7 @@ export function buildAtlasGraph(notes: readonly NoteMeta[]): AtlasGraph {
     index.set(n.path, i)
     return {
       path: n.path,
-      title: n.title,
+      title: n.displayTitle || n.title,
       region: regionKeys.get(atlasRegionKey(n.path))!,
       tags: n.tags,
       createdAt: n.createdAt,

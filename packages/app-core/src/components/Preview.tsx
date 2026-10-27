@@ -1,3 +1,5 @@
+import { CanvasEmbed } from './CanvasEmbed'
+import { copyPreviewContext, rememberPreviewContext } from '../lib/context-copy'
 import { followApplicationLink } from "../lib/application-link-open";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -187,12 +189,17 @@ export const Preview = memo(function Preview({
   notePath,
   onRequestEdit,
   onRendered,
+  readOnly = false,
+  onChange,
 }: {
+  readOnly?: boolean;
+  onChange?: (body: string) => void;
   markdown: string;
   notePath: string;
   onRequestEdit?: ((request?: PreviewEditRequest | null) => void) | null;
   onRendered?: (() => void) | null;
 }): JSX.Element {
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
   const mathRenderer = useStore((s) => s.mathRenderer);
   const looseMathDelimiters = useStore((s) => s.looseMathDelimiters);
@@ -293,7 +300,7 @@ export const Preview = memo(function Preview({
       (target: string): { path: string; title: string } | null => {
         const n = resolveWikilinkTarget(notes, target);
         if (!n) return null;
-        if (isExcalidrawPath(n.path) || isObsidianExcalidrawPath(n.path)) return null;
+        if (n.path.endsWith(".canvas") || isExcalidrawPath(n.path) || isObsidianExcalidrawPath(n.path)) return null;
         return { path: n.path, title: n.title };
       },
     [notes],
@@ -379,8 +386,8 @@ export const Preview = memo(function Preview({
   const togglePinnedRefVisibleRef = useRef(togglePinnedRefVisible);
   const selectNoteRef = useRef(selectNote);
   const openNoteInTabRef = useRef(openNoteInTab);
-  const updateActiveBodyRef = useRef(updateActiveBody);
-  const persistActiveRef = useRef(persistActive);
+  const updateActiveBodyRef = useRef(readOnly ? () => {} : onChange ?? updateActiveBody);
+  const persistActiveRef = useRef(readOnly || onChange ? async () => {} : persistActive);
   // React roots for rendered Excalidraw embed placeholders — unmounted on
   // every re-render and on component teardown to avoid leaks.
   const excalidrawRootsRef = useRef<Root[]>([]);
@@ -419,11 +426,11 @@ export const Preview = memo(function Preview({
     openNoteInTabRef.current = openNoteInTab;
   }, [openNoteInTab]);
   useEffect(() => {
-    updateActiveBodyRef.current = updateActiveBody;
-  }, [updateActiveBody]);
+    updateActiveBodyRef.current = readOnly ? () => {} : onChange ?? updateActiveBody;
+  }, [updateActiveBody, onChange, readOnly]);
   useEffect(() => {
-    persistActiveRef.current = persistActive;
-  }, [persistActive]);
+    persistActiveRef.current = readOnly || onChange ? async () => {} : persistActive;
+  }, [persistActive, onChange, readOnly]);
 
   useEffect(() => {
     const root = ref.current;
@@ -497,6 +504,14 @@ export const Preview = memo(function Preview({
       // there until the next tap. A real pointer that is still over a link
       // puts it back on its next move. (#820)
       setHoveredLink(null);
+      if (window.zen.getLinks && !anchor.classList.contains("hashtag")) {
+        const raw = anchor.dataset.wikilink || anchor.dataset.localAssetHref || anchor.getAttribute("href") || "";
+        if (anchor.classList.contains("wikilink") || (!externalLinkUrl(raw) && !/^[a-z]+:/i.test(raw))) {
+          e.preventDefault();
+          followLinkTarget(raw, { kind: anchor.classList.contains("wikilink") ? "wikilink" : "markdown", sourcePath: notePathRef.current });
+          return;
+        }
+      }
       if (anchor.classList.contains("wikilink")) {
         e.preventDefault();
         const path = anchor.dataset.resolvedPath;
@@ -626,6 +641,7 @@ export const Preview = memo(function Preview({
     // Touch never opens the card; a mouse or a pen's hover still does.
     let lastPointerType = "";
     const notePointerType = (e: PointerEvent): void => {
+      if (e.type === "pointerdown" || e.type === "pointerup") rememberPreviewContext(notePathRef.current, markdownRef.current, e.target as HTMLElement, root);
       lastPointerType = e.pointerType;
     };
     const onMouseOver = (e: MouseEvent): void => {
@@ -719,7 +735,12 @@ export const Preview = memo(function Preview({
       const host = target.closest<HTMLElement>(
         "[data-local-asset-kind][data-local-asset-url]",
       );
-      if (!host) return;
+      if (!host) {
+        e.preventDefault();
+        rememberPreviewContext(notePathRef.current, markdownRef.current, target, root);
+        setContextMenu({ x: e.clientX, y: e.clientY });
+        return;
+      }
       const url = host.dataset.localAssetUrl || "";
       const href =
         host.dataset.localAssetHref || host.getAttribute("href") || "";
@@ -751,6 +772,7 @@ export const Preview = memo(function Preview({
     const pointerOptions = { capture: true, passive: true } as const;
     root.addEventListener("pointerover", notePointerType, pointerOptions);
     root.addEventListener("pointerdown", notePointerType, pointerOptions);
+    root.addEventListener("pointerup", notePointerType, pointerOptions);
     root.addEventListener("pointermove", notePointerType, pointerOptions);
     root.addEventListener("click", onClick);
     root.addEventListener("dblclick", onDoubleClick);
@@ -764,6 +786,7 @@ export const Preview = memo(function Preview({
     return () => {
       root.removeEventListener("pointerover", notePointerType, pointerOptions);
       root.removeEventListener("pointerdown", notePointerType, pointerOptions);
+      root.removeEventListener("pointerup", notePointerType, pointerOptions);
       root.removeEventListener("pointermove", notePointerType, pointerOptions);
       root.removeEventListener("click", onClick);
       root.removeEventListener("dblclick", onDoubleClick);
@@ -856,7 +879,7 @@ export const Preview = memo(function Preview({
         ':scope > input[type="checkbox"], :scope > p > input[type="checkbox"]',
       );
       if (input) {
-        input.disabled = false;
+        input.disabled = readOnly;
         input.dataset.taskIndex = String(idx);
         input.setAttribute("role", "checkbox");
         input.classList.add("cursor-pointer");
@@ -938,6 +961,10 @@ export const Preview = memo(function Preview({
         }
       }
       excalidrawRootsRef.current = [];
+      container.querySelectorAll<HTMLElement>("[data-canvas-embed]").forEach((host) => {
+        const r = createRoot(host); excalidrawRootsRef.current.push(r);
+        r.render(<CanvasEmbed target={host.dataset.canvasEmbed || ""} source={notePath} />);
+      });
       const notePaths = notes.map((n) => n.path);
       container
         .querySelectorAll<HTMLElement>("[data-excalidraw-embed]")
@@ -989,6 +1016,7 @@ export const Preview = memo(function Preview({
     notePath,
     notes,
     onRequestEdit,
+    readOnly,
     oversizedFiles,
     pinnedAssetPath,
     pinnedRefVisible,
@@ -1180,6 +1208,7 @@ export const Preview = memo(function Preview({
           onClose={closeAssetMenu}
         />
       )}
+      {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={[{ label: "Copy Context", onSelect: copyPreviewContext }]} onClose={() => setContextMenu(null)} />}
       {linkMenu && (
         <ContextMenu
           x={linkMenu.x}

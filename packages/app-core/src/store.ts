@@ -1,3 +1,4 @@
+import { useVersionConflicts, VersionConflictError, conflictKey } from './lib/version-conflicts'
 import type { LocalVaultRelocation } from './lib/workspace-relocation'
 import { captureNavigationContext } from './lib/navigation-context'
 import { runWorkspaceTransition, workspaceGeneration, workspaceWritesBlocked, isWorkspaceTransitionPending } from './lib/workspace-transition'
@@ -5132,7 +5133,7 @@ export const useStore = create<Store>((set, get) => {
         const notesBefore = get().notes
         result = await mutate()
         if (!canReconcile()) return
-        if (rename && result && result.path !== path)
+        if (rename && !window.zen.getLinks && result && result.path !== path)
           pendingNoteRename = {
             oldPath: path,
             nextPath: result.path,
@@ -5158,7 +5159,7 @@ export const useStore = create<Store>((set, get) => {
               ]
           }
           const contents = rewritten.noteContents!
-          if (rename) {
+          if (rename && !window.zen.getLinks) {
             for (const [owner, content] of Object.entries(contents)) {
               const body = rewriteRenamingBody(owner, content.body, content.folder)
               if (body !== content.body) {
@@ -5168,7 +5169,7 @@ export const useStore = create<Store>((set, get) => {
             }
           }
           if (result && contents[result.path])
-            contents[result.path] = { ...contents[result.path], ...result }
+            contents[result.path] = { ...contents[result.path], ...result, ...(window.zen.getLinks ? { version: contents[result.path].version } : {}) }
           return {
             ...rewritten,
             manualNoteOrder,
@@ -5195,6 +5196,19 @@ export const useStore = create<Store>((set, get) => {
             ? rewriteFavoriteNotePath(get().vaultSettings.favorites, path, nextPath)
             : get().vaultSettings.favorites.filter((favorite) => favorite !== path)
         )
+        if (window.zen.getLinks && result) {
+          const changed = new Set([result.path, ...(result.changedFiles ?? [])])
+          await Promise.all([...changed].filter((p) => get().noteContents[p] && !get().noteDirty[p]).map(async (p) => {
+            const before = get().noteContents[p]
+            const disk = await window.zen.readNote(p)
+            if (!canReconcile()) return
+            set((cur) => {
+              if (cur.noteDirty[p] || cur.noteContents[p]?.body !== before.body) return cur
+              const contents = { ...cur.noteContents, [p]: disk }
+              return { noteContents: contents, ...activeFieldsFrom(cur.paneLayout, cur.activePaneId, contents, cur.noteDirty) }
+            })
+          }))
+        }
         if (rename && result) await syncHeadingAfterRename(result, get, canReconcile, true)
         if (isCurrent()) await get().refreshNotes()
         return rename ? '' : nextPath
@@ -8238,7 +8252,7 @@ export const useStore = create<Store>((set, get) => {
     // Excalidraw drawings are notes (they live in the notes tree), so treat
     // their change events as note events, not asset events.
     const pathIsNote =
-      ev.path.toLowerCase().endsWith('.md') || isExcalidrawPath(ev.path)
+      ev.path.toLowerCase().endsWith('.md') || ev.path.toLowerCase().endsWith('.canvas') || isExcalidrawPath(ev.path)
     if (ev.scope !== 'vault-settings' && !pathIsNote) {
       await get().refreshAssets()
       return
@@ -8435,13 +8449,14 @@ export const useStore = create<Store>((set, get) => {
       if (!duringFolderMutation && folderMutationBlocks(path)) return
       const content = s.noteContents[path]
       if (!content || !s.noteDirty[path]) return
+      if (useVersionConflicts.getState().conflicts[conflictKey(s.vault?.root, path)]) return
       try {
         // Snapshot only after earlier writes finish. A second caller sees the
         // newest buffer here, then becomes the last writer by construction.
         const writtenBody = content.body
         const tagsBefore = s.notes.find((note) => note.path === path)?.tags
         noteContentVersions.set(path, (noteContentVersions.get(path) ?? 0) + 1)
-        const meta = await window.zen.writeNote(path, writtenBody)
+        const meta = await window.zen.writeNote(path, writtenBody, { baseVersion: content.version })
         if (!isCurrent()) return
         // Saving a Typst preamble note changes the definitions every note tagged
         // for it compiles against, so reload and repaint open panes. (#486)
@@ -8464,6 +8479,7 @@ export const useStore = create<Store>((set, get) => {
           const dirty = stillCurrent ? { ...cur.noteDirty, [path]: false } : cur.noteDirty
           return {
             noteDirty: dirty,
+            noteContents: { ...cur.noteContents, [path]: { ...cur.noteContents[path], version: meta.version } },
             notes: cur.notes.map((n) => (n.path === meta.path ? { ...n, ...meta } : n)),
             ...activeFieldsFrom(cur.paneLayout, cur.activePaneId, cur.noteContents, dirty)
           }
@@ -8475,7 +8491,8 @@ export const useStore = create<Store>((set, get) => {
           emitNoteEvent('tag-added', path)
         }
       } catch (err) {
-        console.error('writeNote failed', err)
+        if (err instanceof VersionConflictError) useVersionConflicts.getState().put(conflictKey(get().vault?.root, path), err)
+        else useToastStore.getState().addToast(humanIpcError(err, "Save failed; the buffer is still unsaved."), 'error')
       }
     }
     const previous = pathSaveQueues.get(path)

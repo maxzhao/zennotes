@@ -14,8 +14,12 @@ export function LazyPreview({
   markdown,
   notePath,
   onRequestEdit,
-  onRendered
+  onRendered,
+  readOnly,
+  onChange
 }: {
+  readOnly?: boolean
+  onChange?: (body: string) => void
   markdown: string
   notePath: string
   onRequestEdit?: ((request?: PreviewEditRequest | null) => void) | null
@@ -28,6 +32,8 @@ export function LazyPreview({
         notePath={notePath}
         onRequestEdit={onRequestEdit}
         onRendered={onRendered}
+        readOnly={readOnly}
+        onChange={onChange}
       />
     </Suspense>
   )

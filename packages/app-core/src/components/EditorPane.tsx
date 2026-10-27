@@ -1,3 +1,7 @@
+import { LazyCanvasView as CanvasView } from './CanvasEmbed'
+import { copyEditorContext, rememberEditorContext } from '../lib/context-copy'
+import { MaxaSidePanes } from './MaxaPanels'
+import { VersionConflictBanner } from './VersionConflictBanner'
 import { noteEditingSync, noteEditingLockExtension, refreshNoteEditingLock } from '../lib/note-lifecycle-lock'
 /**
  * Single pane of the editor split view. Each leaf in the pane-layout
@@ -3401,7 +3405,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
           }
         }
         const meta = path === content?.path ? content : notes.find((n) => n.path === path)
-        const title = meta?.title ?? path.split('/').pop()?.replace(/\.md$/i, '') ?? path
+        const title = meta?.displayTitle || meta?.title || path.split('/').pop()?.replace(/\.(md|canvas)$/i, '') || path
         return {
           ...base,
           title,
@@ -4471,6 +4475,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
           {assetDropActive && (
             <div className="pointer-events-none absolute inset-3 z-20 rounded-xl border-2 border-dashed border-accent/55 bg-accent/8" />
           )}
+          {content && <VersionConflictBanner path={content.path} />}
           {isWorkflowsTabPath(activeTab) ? (
             <LazyWorkflowsView />
           ) : isAtlasTabPath(activeTab) ? (
@@ -4504,6 +4509,8 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             <LazyDiagramTabView diagram={diagramFromTabPath(activeTab)} />
           ) : activeTab && isDatabaseTabPath(activeTab) ? (
             <DatabaseView tabPath={activeTab} isActive={isActive} />
+          ) : activeTab?.toLowerCase().endsWith('.canvas') ? (
+            <CanvasView key={activeTab} path={activeTab} />
           ) : activeTab && isExcalidrawPath(activeTab) ? (
             <LazyExcalidrawView path={activeTab} />
           ) : activeTab &&
@@ -4538,6 +4545,8 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
               >
                 <div
                   ref={editorSurfaceRef}
+                  onPointerDownCapture={rememberEditorContext}
+                  onFocusCapture={rememberEditorContext}
                   className={[
                     'relative min-h-0 min-w-0',
                     splitMode
@@ -4638,6 +4647,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             />
           )}
         </div>
+        {isActive && <MaxaSidePanes />}
         {content && sidePanelShown('connections') && (
           <ConnectionsPanel note={content} fitWidth={sidePanelFit.widths.connections} />
         )}
@@ -4904,6 +4914,7 @@ function buildEditorContextItems(
     { kind: 'separator' },
     ...highlightItems,
     { label: 'Cut', hint: formatKeyToken('Mod+X'), disabled: !hasSelection, onSelect: cut },
+    { label: 'Copy Context', onSelect: () => copyEditorContext(view) },
     { label: 'Copy', hint: formatKeyToken('Mod+C'), disabled: !hasSelection, onSelect: copy },
     { label: 'Paste', hint: formatKeyToken('Mod+V'), onSelect: paste },
     { kind: 'separator' },

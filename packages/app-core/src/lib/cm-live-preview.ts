@@ -1,3 +1,4 @@
+import { CanvasEmbedWidget } from '../components/CanvasEmbed'
 import { syntaxTree } from '@codemirror/language'
 import { RangeSetBuilder, StateEffect, type EditorState } from '@codemirror/state'
 import {
@@ -1412,6 +1413,13 @@ function computeDecorations(view: EditorView): DecorationSet {
             deco: imageEmbedLine
           })
         }
+        continue
+      }
+      const canvasEmbed = line.text.trim().match(/^!\[\[([^\]|]+\.canvas)(?:\|[^\]]*)?\]\]$/i)
+      if (canvasEmbed) {
+        replacedLines.add(lineNo)
+        pending.push({ from: line.to, to: line.to, deco: Decoration.widget({ side: 1, widget: new CanvasEmbedWidget(canvasEmbed[1], paneNote ?? useStore.getState().activeNote?.path ?? '') }) })
+        if (!lineActive) { pending.push({ from: line.from, to: line.to, deco: imageSourceHide }); pending.push({ from: line.from, to: line.from, deco: imageEmbedLine }) }
         continue
       }
       const parsedExcalidraw = parseStandaloneLocalExcalidraw(line.text)
