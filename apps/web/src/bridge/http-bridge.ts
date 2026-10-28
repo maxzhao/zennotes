@@ -497,7 +497,7 @@ function translationCacheStatus(path: string): Promise<TranslationResult> {
   return jsonRequest('/translate/status?path=' + encodeURIComponent(path))
 }
 function translateNote(path: string): Promise<TranslationResult> {
-  return jsonRequest('/translate', { method: 'POST', body: { path } })
+  return jsonRequest('/translate', { method: 'POST', body: { path, async: true } })
 }
 function createCanvas(folder: NoteFolder, title?: string, subpath?: string): Promise<NoteMeta> {
   return jsonRequest('/canvas/create', { method: 'POST', body: { folder, title, subpath } })

@@ -35,110 +35,122 @@ function setState(root: string, path: string, value: TranslationState): void {
   }))
 }
 const revisions = new Map<string, number>()
-export async function refreshTranslationStatus(path: string): Promise<void> {
-  const state = useStore.getState(),
-    root = state.vault?.root
-  if (
-    !root ||
-    !window.zen.translationCacheStatus ||
-    state.noteDirty[path] ||
-    translationState(root, path)?.state === 'translating'
-  )
-    return
-  const key = stateKey(root, path),
-    revision = (revisions.get(key) ?? 0) + 1
-  revisions.set(key, revision)
-  try {
-    const result = await window.zen.translationCacheStatus(path)
-    if (revisions.get(key) === revision)
-      setState(root, path, {
-        state: result.cacheHit ? 'translated' : 'untranslated'
-      })
-  } catch (e) {
-    if (revisions.get(key) === revision)
-      setState(root, path, { state: 'failed', error: String(e) })
-  }
-}
+const polls = new Map<string, ReturnType<typeof setTimeout>>()
+const openWhenReady = new Map<string, number>()
 let translationRequest = 0
-export async function translateNote(path: string): Promise<void> {
-  const state = useStore.getState(),
-    root = state.vault?.root
+function stopPolling(key: string): void {
+  clearTimeout(polls.get(key))
+  polls.delete(key)
+}
+function pollStatus(root: string, path: string): void {
+  const key = stateKey(root, path)
+  stopPolling(key)
+  polls.set(key, setTimeout(() => {
+    polls.delete(key)
+    if (useStore.getState().vault?.root !== root) {
+      openWhenReady.delete(key)
+      return
+    }
+    void refreshTranslationStatus(path)
+  }, 2000))
+}
+function acceptStatus(root: string, path: string, result: TranslationResult): void {
+  if (useStore.getState().vault?.root !== root) return
+  const key = stateKey(root, path)
+  const previous = translationState(root, path)?.state
+  const state = result.cacheHit ? 'translated' : result.state ?? 'untranslated'
+  const error = result.error ? `${result.error.code}: ${result.error.message}` : undefined
+  setState(root, path, { state, error })
+  if (state === 'translating') {
+    pollStatus(root, path)
+    return
+  }
+  stopPolling(key)
+  const request = openWhenReady.get(key)
+  openWhenReady.delete(key)
+  if (state === 'failed' && previous === 'translating')
+    useToastStore.getState().addToast(error ?? 'Translation failed.', 'error')
   if (
-    !root ||
-    !translationAllowed(path) ||
-    !window.zen.translateNote ||
-    !window.zen.translationCacheStatus ||
-    translationState(root, path)?.state === 'translating'
-  )
-    return
-  const dirty = (): boolean => !!useStore.getState().noteDirty[path]
-  const saveFirst = (): void => {
-    useToastStore
-      .getState()
-      .addToast('Save this note before translating.', 'info')
-  }
-  if (dirty()) {
-    saveFirst()
-    return
-  }
-  const wasCached = translationState(root, path)?.state === 'translated'
-  const request = ++translationRequest,
-    key = stateKey(root, path)
-  revisions.set(key, (revisions.get(key) ?? 0) + 1)
-  try {
-    let result: TranslationResult =
-      await window.zen.translationCacheStatus(path)
-    if (
-      useStore.getState().vault?.root !== root ||
-      request !== translationRequest
-    )
-      return
-    if (dirty()) {
-      saveFirst()
-      return
-    }
-    if (!result.cacheHit) {
-      setState(root, path, { state: 'untranslated' })
-      if (wasCached) return
-      if (
-        !(await confirmApp({
-          title: 'Translate this note?',
-          description: 'Send the saved note to the translation provider?',
-          confirmLabel: 'Translate'
-        }))
-      )
-        return
-      if (
-        useStore.getState().vault?.root !== root ||
-        request !== translationRequest
-      )
-        return
-      if (dirty()) {
-        saveFirst()
-        return
-      }
-      setState(root, path, { state: 'translating' })
-      result = await window.zen.translateNote(path)
-      setState(root, path, { state: 'translated' })
-      // The source may have been saved again while the provider was running.
-      void refreshTranslationStatus(path)
-    }
-    setState(root, path, { state: 'translated' })
-    if (
-      useStore.getState().vault?.root !== root ||
-      request !== translationRequest
-    )
-      return
+    result.cacheHit && request === translationRequest &&
+    !useStore.getState().noteDirty[path]
+  ) {
     const note = useStore.getState().notes.find((n) => n.path === path)
     useMaxaPanels.setState({
       translation: {
-        root,
-        source: path,
+        root, source: path,
         title: note?.displayTitle || note?.title || path,
         body: result.body
       }
     })
+  }
+}
+export async function refreshTranslationStatus(path: string): Promise<void> {
+  const state = useStore.getState(), root = state.vault?.root
+  if (!root || !window.zen.translationCacheStatus) return
+  if (state.noteDirty[path]) {
+    if (translationState(root, path)?.state === 'translating') pollStatus(root, path)
+    return
+  }
+  const key = stateKey(root, path), revision = (revisions.get(key) ?? 0) + 1
+  revisions.set(key, revision)
+  try {
+    const result = await window.zen.translationCacheStatus(path)
+    if (revisions.get(key) === revision && !useStore.getState().noteDirty[path])
+      acceptStatus(root, path, result)
   } catch (e) {
+    if (revisions.get(key) === revision && useStore.getState().vault?.root === root) {
+      stopPolling(key)
+      openWhenReady.delete(key)
+      const previous = translationState(root, path)?.state
+      setState(root, path, { state: 'failed', error: String(e) })
+      if (previous === 'translating') useToastStore.getState().addToast(String(e), 'error')
+    }
+  }
+}
+export async function translateNote(path: string): Promise<void> {
+  const state = useStore.getState(), root = state.vault?.root
+  if (
+    !root || !translationAllowed(path) || !window.zen.translateNote ||
+    !window.zen.translationCacheStatus ||
+    translationState(root, path)?.state === 'translating'
+  ) return
+  const dirty = (): boolean => !!useStore.getState().noteDirty[path]
+  const saveFirst = (): void => {
+    useToastStore.getState().addToast('Save this note before translating.', 'info')
+  }
+  if (dirty()) { saveFirst(); return }
+  const wasCached = translationState(root, path)?.state === 'translated'
+  const request = ++translationRequest, key = stateKey(root, path)
+  const current = (): boolean => useStore.getState().vault?.root === root && request === translationRequest
+  revisions.set(key, (revisions.get(key) ?? 0) + 1)
+  try {
+    const result = await window.zen.translationCacheStatus(path)
+    if (!current()) return
+    if (dirty()) { saveFirst(); return }
+    if (result.cacheHit) {
+      openWhenReady.set(key, request)
+      acceptStatus(root, path, result)
+      return
+    }
+    acceptStatus(root, path, result)
+    if (result.state === 'translating' || wasCached) return
+    if (!(await confirmApp({
+      title: 'Translate this note?',
+      description: 'Send the saved note to the translation provider?',
+      confirmLabel: 'Translate'
+    }))) return
+    if (!current()) return
+    if (dirty()) { saveFirst(); return }
+    stopPolling(key)
+    revisions.set(key, (revisions.get(key) ?? 0) + 1)
+    openWhenReady.set(key, request)
+    setState(root, path, { state: 'translating' })
+    await window.zen.translateNote(path)
+    // Query the current saved source, which may have changed while starting.
+    if (useStore.getState().vault?.root === root) await refreshTranslationStatus(path)
+  } catch (e) {
+    stopPolling(key)
+    openWhenReady.delete(key)
     setState(root, path, { state: 'failed', error: String(e) })
     if (useStore.getState().vault?.root === root)
       useToastStore.getState().addToast(String(e), 'error')

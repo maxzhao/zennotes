@@ -32,6 +32,8 @@ export class VersionConflictError extends Error {
 }
 export interface TranslationResult {
   cacheHit: boolean
+  state: 'untranslated' | 'translated' | 'translating' | 'failed'
+  error?: { code: string; message: string }
   cachePath: string
   body: string
 }
