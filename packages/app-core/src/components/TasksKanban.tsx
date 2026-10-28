@@ -2157,6 +2157,8 @@ function TaskCard({
       ref={cardRef ?? undefined}
       hidden={isDragging}
       data-kanban-task-id={taskDomId}
+      data-context-task={task.id}
+      data-context-cursor={isFocused}
       onContextMenu={
         onContextMenu
           ? (e) => {

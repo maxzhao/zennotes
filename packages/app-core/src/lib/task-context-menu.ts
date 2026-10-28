@@ -1,3 +1,5 @@
+import { copyContext } from './context-copy'
+import { taskItem } from './context-format'
 import type { VaultTask } from '@shared/tasks'
 import { toIsoDateLocal } from '@shared/tasks'
 import type { ContextMenuItem } from '../components/ContextMenu'
@@ -71,7 +73,8 @@ export function buildTaskMenuItems(
   const dueIn = (n: number): string => addDaysIso(today, n)
 
   const items: ContextMenuItem[] = [
-    { label: 'Open note', hint: key('⏎'), onSelect: () => void state.openTaskAt(task) }
+    { label: 'Open note', hint: key('⏎'), onSelect: () => void state.openTaskAt(task) },
+    { label: 'Copy Context', onSelect: () => void copyContext([taskItem(task)]) }
   ]
   if (onEdit) items.push({ label: 'Edit', onSelect: onEdit })
 

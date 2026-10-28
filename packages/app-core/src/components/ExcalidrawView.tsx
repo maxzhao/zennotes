@@ -1,3 +1,5 @@
+import { copyContext, useContextSurface, useGrabMode } from '../lib/context-copy'
+import { drawingItems } from '../lib/context-format'
 import { useEffect, useRef, useState } from 'react'
 import type { ComponentProps } from 'react'
 import { Excalidraw, serializeAsJSON } from '@excalidraw/excalidraw'
@@ -136,6 +138,29 @@ export function ExcalidrawView({ path }: { path: string }): JSX.Element {
   const [loaded, setLoaded] = useState<LoadedDrawing | null>(null)
   const setFocusedPanel = useStore((s) => s.setFocusedPanel)
   const sessionRef = useRef<DrawingSession | null>(null)
+  const contextRoot = useRef<HTMLDivElement>(null)
+  const pointerGesture = useRef(false)
+  const selectionOrder = useRef<string[]>([])
+  const pointerFrame = useRef(0)
+  useEffect(() => {
+    const release = (): void => {
+      cancelAnimationFrame(pointerFrame.current)
+      pointerFrame.current = requestAnimationFrame(() => { pointerGesture.current = false })
+    }
+    window.addEventListener('pointerup', release, true)
+    window.addEventListener('pointercancel', release, true)
+    return () => {
+      cancelAnimationFrame(pointerFrame.current)
+      window.removeEventListener('pointerup', release, true)
+      window.removeEventListener('pointercancel', release, true)
+    }
+  }, [])
+  useEffect(() => { selectionOrder.current = []; pointerGesture.current = false }, [path])
+  const selectedContext = () => {
+    const scene = sessionRef.current?.latest
+    return scene ? drawingItems(path, scene.elements, Object.fromEntries(selectionOrder.current.map(id => [id, true]))) : []
+  }
+  useContextSurface(contextRoot, { identity: 'draw:' + path, direct: selectedContext })
 
   // Follow the app's resolved light/dark mode. That mode lives on
   // `<html data-theme-mode>`, maintained in App.tsx (it already accounts for
@@ -216,6 +241,8 @@ export function ExcalidrawView({ path }: { path: string }): JSX.Element {
     <div
       className="min-h-0 w-full flex-1"
       style={{ height: '100%' }}
+      ref={contextRoot}
+      onPointerDownCapture={() => { cancelAnimationFrame(pointerFrame.current); pointerGesture.current = true }}
       data-excalidraw-view
       onMouseDownCapture={() => setFocusedPanel('editor')}
       onFocusCapture={() => setFocusedPanel('editor')}
@@ -227,9 +254,20 @@ export function ExcalidrawView({ path }: { path: string }): JSX.Element {
         key={session.path}
         initialData={initialData}
         theme={excalidrawTheme}
-        onChange={(elements, appState, files) =>
+        onChange={(elements, appState, files) => {
+          if (session.closed || session.path !== path) return
+          const ids = Object.keys(appState.selectedElementIds ?? {}).filter(id => appState.selectedElementIds[id])
+          const previous = selectionOrder.current
+          const next = previous.filter(id => ids.includes(id))
+          for (const id of ids) if (!next.includes(id)) next.push(id)
+          const changed = next.length !== previous.length || next.some((id, i) => id !== previous[i])
+          selectionOrder.current = next
           recordChange(session, elements, appState, files)
-        }
+          if (changed && pointerGesture.current && useGrabMode.getState().active) {
+            const items = selectedContext()
+            if (items.length) void copyContext(items)
+          }
+        }}
       />
     </div>
   )

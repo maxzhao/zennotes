@@ -1,3 +1,6 @@
+import { useState } from 'react'
+import { ContextMenu } from './ContextMenu'
+import { buildTaskMenuItems } from '../lib/task-context-menu'
 import type { VaultTask } from '@shared/tasks'
 import { useStore } from '../store'
 import { TaskStateBox } from './TaskStateBox'
@@ -11,6 +14,7 @@ export function TodoSubtasks({
 }): JSX.Element | null {
   const tasks = useStore((s) => s.vaultTasks)
   const toggle = useStore((s) => s.toggleTaskFromList)
+  const [menu, setMenu] = useState<{ x: number; y: number; task: VaultTask } | null>(null)
   if (!task.progress) return null
   return (
     <div
@@ -24,7 +28,8 @@ export function TodoSubtasks({
       {tasks
         .filter((child) => child.parentId === task.id)
         .map((child) => (
-          <div key={child.id} className="ml-3 flex items-start gap-2 py-0.5">
+          <div key={child.id} data-context-task={child.id} className="ml-3 flex items-start gap-2 py-0.5"
+            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY, task: child }) }}>
             <TaskStateBox task={child} onToggle={() => void toggle(child)} />
             <span
               className={
@@ -37,6 +42,7 @@ export function TodoSubtasks({
             </span>
           </div>
         ))}
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={buildTaskMenuItems(menu.task)} onClose={() => setMenu(null)} />}
     </div>
   )
 }

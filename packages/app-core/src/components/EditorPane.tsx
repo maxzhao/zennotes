@@ -1,3 +1,5 @@
+import { GrabButton } from '../lib/context-copy'
+import { useEditorContext } from '../lib/context-markdown'
 import { TranslationButton } from './TranslationButton'
 import { usePaneTranslation } from '../lib/maxa-panels'
 import { LazyCanvasView as CanvasView } from './CanvasEmbed'
@@ -3911,6 +3913,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     viewRef.current?.focus()
   }, [focusedPanel, isActive, setFocusedPanel, sidePanelFit.tucked])
 
+  useEditorContext(editorSurfaceRef, viewRef, content?.path ?? null)
   const toolbar = useMemo(() => {
     if (!content) return null
     const folder = content.folder
@@ -3973,6 +3976,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             </IconBtn>
           </>
         )}
+        {(isDrawing || content.path.toLowerCase().endsWith('.md') || content.path.toLowerCase().endsWith('.canvas')) && !isObsidianExcalidrawPath(content.path) && <GrabButton />}
         {folder === 'trash' ? (
           <IconBtn title="Restore" onClick={() => void restoreActive()}>
             <ArrowUpRightIcon />

@@ -23,6 +23,8 @@ export interface ExpandEmbedsCtx {
   loadNote: (path: string) => Promise<string | null>
   /** Max embed nesting before we stop and show a notice. Default 6. */
   maxDepth?: number
+  /** Host-source offsets for preview context locators, before expansion. */
+  onReplace?: (from: number, to: number, text: string) => void
 }
 
 const DEFAULT_MAX_DEPTH = 6
@@ -99,6 +101,10 @@ async function expand(
   for (const m of matches) {
     out += md.slice(last, m.index)
     last = m.index! + m[0].length
+    const append = (text: string): void => {
+      if (depth === 0) ctx.onReplace?.(m.index!, last, text)
+      out += text
+    }
     const target = (m[1].split('|', 1)[0] ?? '').trim() // strip any |label
     const note = target ? ctx.resolve(target, fromPath) : null
     if (!note) {
@@ -106,16 +112,16 @@ async function expand(
       continue
     }
     if (stack.includes(note.path)) {
-      out += notice(target, 'circular')
+      append(notice(target, 'circular'))
       continue
     }
     if (depth >= maxDepth) {
-      out += notice(target, 'too-deep')
+      append(notice(target, 'too-deep'))
       continue
     }
     const body = await ctx.loadNote(note.path)
     if (body == null) {
-      out += notice(target, 'missing')
+      append(notice(target, 'missing'))
       continue
     }
     // `![[Note^id]]` embeds just the block that id marks, not the whole
@@ -125,13 +131,13 @@ async function expand(
     if (blockId) {
       const block = extractBlock(body, blockId)
       if (block == null) {
-        out += notice(target, 'missing-block')
+        append(notice(target, 'missing-block'))
         continue
       }
       source = block
     }
     const inner = await expand(source, note.path, ctx, [...stack, note.path], depth + 1)
-    out += wrapEmbed(target, blockId ? `${note.title || target} > ${blockId}` : note.title, inner)
+    append(wrapEmbed(target, blockId ? `${note.title || target} > ${blockId}` : note.title, inner))
   }
   out += md.slice(last)
   return out

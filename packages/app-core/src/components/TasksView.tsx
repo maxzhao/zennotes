@@ -1,3 +1,5 @@
+import { GrabButton } from '../lib/context-copy'
+import { useTasksContext } from '../lib/context-tasks'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isTasksViewActive, useStore, type KanbanCardSort, type TasksListOrder, type TasksViewMode } from '../store'
 import { filterTasksForDisplay, inferDailyTaskDueDates, type VaultTask } from '@shared/tasks'
@@ -121,6 +123,7 @@ export function TasksView(): JSX.Element {
 
   const filterRef = useRef<HTMLInputElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
+  useTasksContext(rootRef, viewMode)
   const exRef = useRef<HTMLInputElement>(null)
   const gPending = useRef(0)
   const gTimer = useRef<ReturnType<typeof setTimeout>>()
@@ -840,6 +843,7 @@ export function TasksView(): JSX.Element {
       <div className="flex items-center gap-2 border-b border-paper-300/45 px-4 py-3">
         <CheckSquareIcon width={18} height={18} />
         <h1 className="text-sm font-semibold">Tasks</h1>
+        <GrabButton />
         <span className="ml-2 rounded bg-paper-300/60 px-1.5 py-0.5 text-xs text-current/60">
           {filter.trim() ? `${filteredTasks.length} of ${tasks.length}` : `${tasks.length} total`}
         </span>

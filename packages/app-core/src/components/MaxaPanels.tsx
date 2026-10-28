@@ -1,3 +1,4 @@
+import { useContextCopyRuntime } from '../lib/context-copy'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { useMaxaPanels } from '../lib/maxa-panels'
@@ -215,6 +216,7 @@ function RecentPalette(): JSX.Element {
   )
 }
 export function MaxaSidePanes(): JSX.Element | null {
+  useContextCopyRuntime()
   const recent = useMaxaPanels((s) => s.recent)
   return recent ? <RecentPalette /> : null
 }

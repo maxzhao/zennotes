@@ -1,3 +1,4 @@
+import { TodoSubtasks } from './TodoSubtasks'
 /**
  * Month-grid Calendar view for the Tasks tab.
  *
@@ -713,6 +714,7 @@ export function TasksCalendar({
                   {cellTasks.slice(0, 6).map((task) => (
                     <span
                       key={task.id}
+                      data-context-task={task.id}
                       className={[
                         'h-1.5 w-1.5 rounded-full',
                         overdueCount > 0 && task.due && task.due < todayIso
@@ -884,6 +886,8 @@ function CalendarTaskRow({
     // role/tabIndex/onKeyDown keep it keyboard-accessible.
     <div
       role="button"
+      data-context-task={task.id}
+      data-context-cursor={isActive}
       tabIndex={0}
       ref={buttonRef ?? undefined}
       onClick={onOpen}
@@ -931,9 +935,9 @@ function CalendarTaskRow({
           </svg>
         )}
       </span>
-      <span
+      <div
         className={[
-          'min-w-0 flex-1 truncate',
+          'min-w-0 flex-1',
           task.checked ? 'text-current/50 line-through' : ''
         ].join(' ')}
       >
@@ -942,7 +946,8 @@ function CalendarTaskRow({
         ) : (
           '(empty task)'
         )}
-      </span>
+        <TodoSubtasks task={task} />
+      </div>
       <span className="shrink-0 truncate text-xs text-current/45">{task.noteTitle}</span>
       <CloudTaskConflictIndicator path={task.sourcePath} />
       {task.priority && (

@@ -1,3 +1,5 @@
+import { useContextSurface } from '../lib/context-copy'
+import { canvasItem } from '../lib/context-format'
 import { resolveCanvasSubpath, sourceLines } from '../lib/canvas-subpath'
 import {
   lockCanvasAxis,
@@ -498,6 +500,30 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
   } | null>(null)
   const host = useRef<HTMLDivElement>(null),
     flow = useReactFlow<FlowCard>()
+  const contextOrder = useRef<string[]>([])
+  const selectedKeys = [...selection].map(id => 'node ' + id).concat([...edgeSelection].map(id => 'edge ' + id))
+  contextOrder.current = contextOrder.current.filter(key => selectedKeys.includes(key))
+  for (const key of selectedKeys) if (!contextOrder.current.includes(key)) contextOrder.current.push(key)
+  const contextComponent = (key: string) => key.startsWith('node ')
+    ? doc.nodes?.find(n => n.id === key.slice(5)) : doc.edges?.find(e => e.id === key.slice(5))
+  useContextSurface(host, {
+    identity: 'canvas:' + path,
+    resolve: item => {
+      const component = contextComponent(item.key)
+      return component ? canvasItem(path, component) : null
+    },
+    direct: () => contextOrder.current.flatMap(key => {
+      const component = contextComponent(key)
+      return component ? [canvasItem(path, component)] : []
+    }),
+    at: event => {
+      const target = event.target instanceof Element ? event.target : null
+      const element = target?.closest('.react-flow__node, .react-flow__edge')
+      const id = element?.getAttribute('data-id')
+      const component = element?.matches('.react-flow__node') ? doc.nodes?.find(n => n.id === id) : doc.edges?.find(e => e.id === id)
+      return component && element ? { item: canvasItem(path, component), rects: [element.getBoundingClientRect()] } : null
+    }
+  }, !embedded)
   const conflict = useVersionConflicts((s) => s.conflicts[conflictKey(root, path)])
   const locked = embedded || readonly || !!parsed.error
   const commit = (next: CanvasDocument, record = true): void => {

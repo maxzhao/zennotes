@@ -6343,3 +6343,7 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
   border-color: rgb(var(--z-red) / 0.55);
   background: rgb(var(--z-red) / 0.14);
 }
+/* Let the Canvas node, not its embedded browsing context, receive a grab. */
+[data-grab-mode] .zn-canvas iframe {
+  pointer-events: none;
+}

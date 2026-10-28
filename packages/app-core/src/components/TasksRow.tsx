@@ -64,6 +64,8 @@ export function TasksRow({
   return (
     <div
       data-task-row={task.id}
+      data-context-task={task.id}
+      data-context-cursor={isCursor}
       onContextMenu={
         onContextMenu
           ? (e) => {

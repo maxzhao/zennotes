@@ -1,3 +1,4 @@
+import { copyCurrentContext, toggleGrabMode } from './context-copy'
 import { createCanvas } from './canvas-actions'
 import { useMaxaPanels, translateNote, translationAllowed } from './maxa-panels'
 /**
@@ -47,7 +48,7 @@ import { csvPathFromDatabaseTab } from '@shared/databases'
 import { canRenameVault, renameVaultWithPrompt } from './rename-vault'
 import { promptImageWidth } from './image-resize'
 import { copyLinkAtCursor } from './link-copy'
-import { getKeymapDisplay, getLeaderChordDisplay, type KeymapId } from './keymaps'
+import { getKeymapDisplay, getLeaderChordDisplay, formatKeymapBinding, type KeymapId } from './keymaps'
 import { dispatchKeyboardContextMenu, findTabContextMenuTarget } from './keyboard-context-menu'
 import { resolveSystemFolderLabels } from './system-folder-labels'
 import { isCalendarToggleAvailable, noteFolderSubpath } from './vault-layout'
@@ -129,6 +130,8 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
     return !!state.activeNote && state.vaultSettings.favorites.includes(state.activeNote.path)
   }
   const cmds: Command[] = [
+    { id: 'context.copy', title: 'Copy Context', category: 'Context', shortcut: formatKeymapBinding('Mod+Alt+C', 'shortcut'), run: copyCurrentContext },
+    { id: 'context.grab', title: 'Toggle Grab Mode', category: 'Context', shortcut: formatKeymapBinding('Mod+Alt+G', 'shortcut'), run: toggleGrabMode },
     { id: 'canvas.new', title: 'New canvas', category: 'Canvas', when: () => !!window.zen.createCanvas, run: () => createCanvas() },
     { id: 'view.recent', title: 'Open Recent', category: 'View', shortcut: shortcut('global.openRecent'), keywords: 'recent files quick open', run: () => { useMaxaPanels.setState({ recent: true }) } },
     { id: 'note.translate', title: 'Translate', category: 'Note', when: () => !!window.zen.translateNote && !!window.zen.translationCacheStatus && translationAllowed(getState().selectedPath ?? ''), run: () => translateNote(getState().selectedPath!) },

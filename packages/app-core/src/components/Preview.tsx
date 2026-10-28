@@ -1,3 +1,4 @@
+import { usePreviewContext, previewLineMap, type EmbedReplacement } from '../lib/context-markdown';
 import { CanvasEmbed } from './CanvasEmbed'
 import { followApplicationLink } from "../lib/application-link-open";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -310,15 +311,18 @@ export const Preview = memo(function Preview({
   const [embedExpansion, setEmbedExpansion] = useState<{
     src: string;
     out: string;
+    replacements: EmbedReplacement[];
   } | null>(null);
   const expandedForCurrent =
     embedExpansion?.src === markdown ? embedExpansion.out : null;
   useEffect(() => {
     if (!hasEmbeds || expandedForCurrent != null) return;
     let cancelled = false;
+    const replacements: EmbedReplacement[] = [];
     const timer = setTimeout(() => {
       void expandEmbeds(markdown, notePath, {
         resolve: resolveEmbedTarget,
+        onReplace: (from, to, text) => replacements.push({ from, to, text }),
         loadNote: async (path) => {
           try {
             return (await window.zen.readNote(path)).body ?? null;
@@ -327,7 +331,7 @@ export const Preview = memo(function Preview({
           }
         },
       }).then((out) => {
-        if (!cancelled) setEmbedExpansion({ src: markdown, out });
+        if (!cancelled) setEmbedExpansion({ src: markdown, out, replacements });
       });
     }, 120);
     return () => {
@@ -335,6 +339,10 @@ export const Preview = memo(function Preview({
       clearTimeout(timer);
     };
   }, [hasEmbeds, expandedForCurrent, markdown, notePath, resolveEmbedTarget]);
+  const contextLineMap = useMemo(() => expandedForCurrent !== null
+    ? previewLineMap(markdown, expandedForCurrent, embedExpansion?.replacements ?? []) : undefined,
+    [markdown, expandedForCurrent, embedExpansion]);
+  usePreviewContext(ref, notePath, markdown, contextLineMap, !!notePath && !readOnly);
   // Gate the PDF-ready signal (onRendered) until embeds resolve, so exports
   // capture the expanded document rather than the bare links.
   const embedsReady = !hasEmbeds || expandedForCurrent != null;
