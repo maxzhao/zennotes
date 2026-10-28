@@ -1,4 +1,3 @@
-import { copyCurrentContext } from '../lib/context-copy'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { useMaxaPanels } from '../lib/maxa-panels'
@@ -218,17 +217,6 @@ function RecentPalette(): JSX.Element {
 }
 export function MaxaSidePanes(): JSX.Element {
   const { recent, translation } = useMaxaPanels()
-  useEffect(() => {
-    const key = (e: KeyboardEvent): void => {
-      if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === 'c') {
-        e.preventDefault()
-        e.stopPropagation()
-        void copyCurrentContext()
-      }
-    }
-    window.addEventListener('keydown', key, true)
-    return () => window.removeEventListener('keydown', key, true)
-  }, [])
   const root = useStore((s) => s.vault?.root)
   return (
     <>
@@ -247,7 +235,7 @@ export function MaxaSidePanes(): JSX.Element {
               ×
             </button>
           </header>
-          <Preview markdown={translation.body} notePath={translation.path} readOnly />
+          <Preview markdown={translation.body} notePath={translation.source} readOnly />
         </aside>
       )}
     </>

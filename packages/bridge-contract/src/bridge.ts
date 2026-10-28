@@ -388,6 +388,7 @@ export interface ZenBridge {
   listDatabases(): Promise<DatabaseSummary[]>
   getLinks?(kind: "outgoing" | "backlinks" | "unresolved", path?: string): Promise<LinkReference[]>
   getOrphans?(): Promise<{ path: string }[]>
+  translationCacheStatus?(path: string): Promise<TranslationResult>
   translateNote?(path: string): Promise<TranslationResult>
   createCanvas?(folder: NoteFolder, title?: string, subpath?: string): Promise<NoteMeta>
   writeNote(relPath: string, body: string, options?: WriteOptions): Promise<NoteMeta>

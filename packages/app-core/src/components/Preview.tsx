@@ -1,5 +1,4 @@
 import { CanvasEmbed } from './CanvasEmbed'
-import { copyPreviewContext, rememberPreviewContext } from '../lib/context-copy'
 import { followApplicationLink } from "../lib/application-link-open";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -199,7 +198,6 @@ export const Preview = memo(function Preview({
   onRequestEdit?: ((request?: PreviewEditRequest | null) => void) | null;
   onRendered?: (() => void) | null;
 }): JSX.Element {
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
   const mathRenderer = useStore((s) => s.mathRenderer);
   const looseMathDelimiters = useStore((s) => s.looseMathDelimiters);
@@ -641,7 +639,6 @@ export const Preview = memo(function Preview({
     // Touch never opens the card; a mouse or a pen's hover still does.
     let lastPointerType = "";
     const notePointerType = (e: PointerEvent): void => {
-      if (e.type === "pointerdown" || e.type === "pointerup") rememberPreviewContext(notePathRef.current, markdownRef.current, e.target as HTMLElement, root);
       lastPointerType = e.pointerType;
     };
     const onMouseOver = (e: MouseEvent): void => {
@@ -735,12 +732,7 @@ export const Preview = memo(function Preview({
       const host = target.closest<HTMLElement>(
         "[data-local-asset-kind][data-local-asset-url]",
       );
-      if (!host) {
-        e.preventDefault();
-        rememberPreviewContext(notePathRef.current, markdownRef.current, target, root);
-        setContextMenu({ x: e.clientX, y: e.clientY });
-        return;
-      }
+      if (!host) return;
       const url = host.dataset.localAssetUrl || "";
       const href =
         host.dataset.localAssetHref || host.getAttribute("href") || "";
@@ -1208,7 +1200,6 @@ export const Preview = memo(function Preview({
           onClose={closeAssetMenu}
         />
       )}
-      {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={[{ label: "Copy Context", onSelect: copyPreviewContext }]} onClose={() => setContextMenu(null)} />}
       {linkMenu && (
         <ContextMenu
           x={linkMenu.x}

@@ -1,3 +1,4 @@
+import { mutateTodoSeq, withTodoMutationState } from '@shared/todoseq'
 import { useVersionConflicts, VersionConflictError, conflictKey } from './lib/version-conflicts'
 import type { LocalVaultRelocation } from './lib/workspace-relocation'
 import { captureNavigationContext } from './lib/navigation-context'
@@ -2176,6 +2177,7 @@ function applyTaskMutationsToTask(task: VaultTask, mutations: TaskMutation[]): V
         break
       }
     }
+    next = withTodoMutationState(next, m)
   }
   return next
 }
@@ -7176,6 +7178,7 @@ export const useStore = create<Store>((set, get) => {
   },
 
   toggleTaskFromList: trackTaskWrite(async (task) => {
+    if (task.syntax === 'todoseq') return get().applyTaskMutation(task, { kind: 'set-checked', checked: !task.checked })
     const state = get()
     const path = task.sourcePath
     const openBuffer = state.noteContents[path]
@@ -7218,6 +7221,7 @@ export const useStore = create<Store>((set, get) => {
   }),
 
   cancelTaskFromList: trackTaskWrite(async (task) => {
+    if (task.syntax === 'todoseq') return get().applyTaskMutation(task, { kind: 'set-field', key: 'status', value: task.cancelled ? 'todo' : 'cancelled' })
     const path = task.sourcePath
     const openBuffer = get().noteContents[path]
     const body = openBuffer?.body ?? (await window.zen.readNote(path)).body
@@ -7252,6 +7256,7 @@ export const useStore = create<Store>((set, get) => {
   }),
 
   startTaskFromList: trackTaskWrite(async (task) => {
+    if (task.syntax === 'todoseq') return get().applyTaskMutation(task, { kind: 'set-in-progress', inProgress: !task.inProgress })
     const path = task.sourcePath
     const openBuffer = get().noteContents[path]
     const body = openBuffer?.body ?? (await window.zen.readNote(path)).body
@@ -7330,6 +7335,14 @@ export const useStore = create<Store>((set, get) => {
             body,
             fileTaskMutationUpdates(mutations, toIsoDateLocal(new Date()))
           )
+        } else if (task.syntax === 'todoseq') {
+          try {
+            for (const m of mutations) nextBody = mutateTodoSeq(nextBody, task, m)
+          } catch (err) {
+            useToastStore.getState().addToast(String(err), 'error')
+            void get().rescanTasksForPath(path)
+            return
+          }
         } else {
           for (const m of mutations) {
             switch (m.kind) {

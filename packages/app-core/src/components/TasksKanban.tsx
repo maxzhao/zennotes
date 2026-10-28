@@ -1,3 +1,5 @@
+import { withTodoMutationState } from '@shared/todoseq'
+import { TodoSubtasks } from './TodoSubtasks'
 import { dropMutationsFor } from '../lib/task-column-mutations'
 /**
  * Kanban view for the Tasks tab.
@@ -355,7 +357,7 @@ export function fieldColumns(tasks: VaultTask[], fieldKey: string, order: string
   const configured = new Set(order)
   for (const task of tasks) {
     const value = task.fields?.[fieldKey]
-    if (!isBoardCard(task) && !(task.kind === 'file' && value && configured.has(value))) continue
+    if (!isBoardCard(task) && !(task.syntax === 'todoseq' && fieldKey === 'status') && !(task.kind === 'file' && value && configured.has(value))) continue
     if (value) {
       const list = byValue.get(value)
       if (list) list.push(task)
@@ -415,13 +417,13 @@ function buildColumns(
 }
 
 function sameTaskIdentity(a: VaultTask, b: VaultTask): boolean {
-  return a.sourcePath === b.sourcePath && a.taskIndex === b.taskIndex
+  return taskIdentityKey(a) === taskIdentityKey(b)
 }
 
 /** Identity of a task on the board: the note it lives in plus its position in
  *  that note. Survives a column move, which only rewrites the task's tokens. */
 export function taskIdentityKey(task: VaultTask): string {
-  return `${task.sourcePath}\0${task.taskIndex}`
+  return task.syntax === 'todoseq' ? task.id : `${task.sourcePath}\0${task.taskIndex}`
 }
 
 /**
@@ -494,6 +496,7 @@ function applyTaskMutationsForBoard(task: VaultTask, mutations: TaskMutation[]):
         break
       }
     }
+    next = withTodoMutationState(next, m)
   }
   return next
 }
@@ -2213,6 +2216,7 @@ function TaskCard({
           ].join(' ')}
         >
           {task.content ? <InlineMarkdown text={task.content} /> : '(empty task)'}
+          <TodoSubtasks task={task} />
         </div>
         <button
           type="button"

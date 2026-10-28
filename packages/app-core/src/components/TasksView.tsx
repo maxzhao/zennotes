@@ -81,7 +81,7 @@ export function TasksView(): JSX.Element {
   )
   const showArchivedTasks = useStore((s) => s.showArchivedTasks)
   const tasks = useMemo(
-    () => inferDailyTaskDueDates(filterTasksForDisplay(rawTasks, showArchivedTasks), dueByPath),
+    () => inferDailyTaskDueDates(filterTasksForDisplay(rawTasks, showArchivedTasks).filter(task => !task.parentId), dueByPath),
     [rawTasks, showArchivedTasks, dueByPath]
   )
   // One filter, three sub-views: the list applies it inside computeTasksRender,

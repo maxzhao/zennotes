@@ -1,3 +1,4 @@
+import { TodoSubtasks } from './TodoSubtasks'
 import { useState } from 'react'
 import type { VaultTask } from '@shared/tasks'
 import { ArrowUpRightIcon } from './icons'
@@ -148,6 +149,7 @@ export function TasksRow({
         >
           {task.content ? <InlineMarkdown text={task.content} /> : '(empty task)'}
         </div>
+        <TodoSubtasks task={task} />
         <div className="mt-0.5 flex items-center gap-2 text-xs text-current/50">
           <span className="truncate">{task.noteTitle}</span>
           <CloudTaskConflictIndicator path={task.sourcePath} />

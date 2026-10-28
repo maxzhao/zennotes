@@ -1,5 +1,4 @@
 import { createCanvas } from '../lib/canvas-actions'
-import { translateNote } from '../lib/maxa-panels'
 import { SidebarRecent } from './MaxaPanels'
 import { runNoteLifecycleAction, runNoteBatchAction, runEmptyTrash } from "../lib/note-lifecycle-actions";
 import {
@@ -2216,7 +2215,6 @@ export function Sidebar(): JSX.Element {
       });
     }
     if (n.folder !== "trash") {
-      if (window.zen.translateNote) items.push({ label: "Translate", onSelect: () => translateNote(n.path) });
       const isFav = vaultSettings.favorites.includes(n.path);
       items.push({
         label: isFav ? "Remove from Favorites" : "Add to Favorites",

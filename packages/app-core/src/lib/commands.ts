@@ -1,6 +1,5 @@
 import { createCanvas } from './canvas-actions'
-import { useMaxaPanels, translateNote } from './maxa-panels'
-import { copyCurrentContext } from './context-copy'
+import { useMaxaPanels, translateNote, translationAllowed } from './maxa-panels'
 /**
  * Command registry for the app's Cmd+Shift+P palette.
  *
@@ -131,9 +130,8 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
   }
   const cmds: Command[] = [
     { id: 'canvas.new', title: 'New canvas', category: 'Canvas', when: () => !!window.zen.createCanvas, run: () => createCanvas() },
-    { id: 'context.copy', title: 'Copy Context', category: 'Note', shortcut: 'Ctrl/Cmd+Alt+C', run: copyCurrentContext },
     { id: 'view.recent', title: 'Open Recent', category: 'View', shortcut: shortcut('global.openRecent'), keywords: 'recent files quick open', run: () => { useMaxaPanels.setState({ recent: true }) } },
-    { id: 'note.translate', title: 'Translate', category: 'Note', when: () => !!window.zen.translateNote && !!getState().selectedPath, run: () => translateNote(getState().selectedPath!) },
+    { id: 'note.translate', title: 'Translate', category: 'Note', when: () => !!window.zen.translateNote && !!window.zen.translationCacheStatus && translationAllowed(getState().selectedPath ?? ''), run: () => translateNote(getState().selectedPath!) },
     ...(['group', 'jump-group', 'export'] as const).map((action) => ({ id: 'canvas.' + action, title: action === 'group' ? 'Create group' : action === 'jump-group' ? 'Jump to group' : 'Export as image', category: 'Canvas', when: () => !!getState().selectedPath?.endsWith('.canvas'), run: () => { window.dispatchEvent(new CustomEvent('zen:canvas-command', { detail: action })) } }))
   ]
 

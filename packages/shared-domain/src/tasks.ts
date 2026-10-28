@@ -1,3 +1,4 @@
+import { scanTodoSeq, todoStatus, todoPriority, todoText, todoPlanning, attachTodoChildren } from './todoseq'
 import type { TaskPriority, VaultTask } from '@zennotes/bridge-contract/tasks'
 import { parseFrontmatterFields, unquote } from './frontmatter'
 import type { NoteFolder } from './ipc'
@@ -165,7 +166,7 @@ interface ExtractedTokens {
   stripped: string
 }
 
-function extractTokens(tail: string): ExtractedTokens {
+function extractTokens(tail: string, todoseq = false): ExtractedTokens {
   let due: string | undefined
   let priority: TaskPriority | undefined
   let waiting = false
@@ -173,20 +174,20 @@ function extractTokens(tail: string): ExtractedTokens {
   const tags: string[] = []
   let stripped = tail
 
-  const dueMatch = stripped.match(INLINE_DUE_RE)
+  const dueMatch = !todoseq && stripped.match(INLINE_DUE_RE)
   if (dueMatch) {
     const candidate = dueMatch[1]
     if (isValidIsoDate(candidate)) due = candidate
     stripped = stripped.replace(INLINE_DUE_RE, ' ')
   }
 
-  const priMatch = stripped.match(INLINE_PRIORITY_RE)
+  const priMatch = !todoseq && stripped.match(INLINE_PRIORITY_RE)
   if (priMatch) {
     priority = normalizePriority(priMatch[1])
     stripped = stripped.replace(INLINE_PRIORITY_RE, ' ')
   }
 
-  if (INLINE_WAITING_RE.test(stripped)) {
+  if (!todoseq && INLINE_WAITING_RE.test(stripped)) {
     waiting = true
     stripped = stripped.replace(INLINE_WAITING_RE, ' ')
   }
@@ -255,6 +256,8 @@ export function parseTasksFromBody(
   if (defaults.tasksMode !== 'all' && !opts?.includeExcluded) return []
   const lines = normalized.split('\n')
   const tasks: VaultTask[] = []
+  const scans = scanTodoSeq(normalized)
+  const byLine = new Map(scans.map(scan => [scan.line, scan]))
 
   let taskIndex = 0
   let inFence = false
@@ -278,24 +281,25 @@ export function parseTasksFromBody(
     if (inFence) continue
 
     const taskMatch = line.match(TASK_LINE_RE)
-    if (!taskMatch) continue
+    const scan = byLine.get(i)
+    if (!taskMatch && !scan) continue
 
-    const checkedChar = taskMatch[2]
-    const tail = taskMatch[3].replace(/^\]/, '') // drop the closing `]` of the checkbox
+    const checkedChar = taskMatch?.[2] ?? ' '
+    const tail = scan ? todoText(scan.match[5]) : taskMatch![3].replace(/^\]/, '') // drop the closing `]` of the checkbox
     const checked = checkedChar === 'x' || checkedChar === 'X'
     const forwarded = checkedChar === '>'
     const cancelled = checkedChar === '-'
     const inProgress = checkedChar === '/'
 
-    const tokens = extractTokens(tail)
+    const tokens = extractTokens(tail, !!scan)
 
     tasks.push({
-      id: `${ctx.path}#${taskIndex}`,
+      id: scan && scan.checkboxIndex == null ? `${ctx.path}#todoseq:${scan.index}` : `${ctx.path}#${taskIndex}`,
       sourcePath: ctx.path,
       noteTitle: ctx.title,
       noteFolder: ctx.folder,
       lineNumber: i,
-      taskIndex,
+      taskIndex: scan && scan.checkboxIndex == null ? -2 - scan.index : taskIndex,
       rawText: line,
       content: tokens.stripped || tail.trim(),
       checked,
@@ -312,13 +316,21 @@ export function parseTasksFromBody(
           ? { ...tokens.fields, status: defaults.status }
           : tokens.fields,
       status: tokens.fields.status ?? defaults.status,
-      tags: tokens.tags
+      tags: tokens.tags,
+      ...(scan ? {
+        syntax: 'todoseq' as const, keyword: scan.match[3],
+        checked: todoStatus[scan.match[3]] === 'done',
+        forwarded: false, cancelled: todoStatus[scan.match[3]] === 'cancelled',
+        inProgress: todoStatus[scan.match[3]] === 'doing', waiting: todoStatus[scan.match[3]] === 'waiting',
+        status: todoStatus[scan.match[3]], fields: { ...tokens.fields, status: todoStatus[scan.match[3]] },
+        due: undefined, priority: todoPriority(scan.match[5]), ...todoPlanning(lines, scan)
+      } : {})
     })
 
-    taskIndex += 1
+    if (taskMatch) taskIndex += 1
   }
 
-  return tasks
+  return attachTodoChildren(tasks, scans)
 }
 
 // ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+import { resolveCanvasSubpath, sourceLines } from '../lib/canvas-subpath'
 import {
   lockCanvasAxis,
   resizeCanvasRect,
@@ -53,8 +54,7 @@ import {
   type CanvasEdge,
   type CanvasSide
 } from '../lib/json-canvas'
-import { formatCanvasContext, resolveCanvasSubpath, sourceLines } from '../lib/context-format'
-import { copyWithFallback } from '../lib/context-copy'
+import { copyWithFallback } from '../lib/clipboard'
 import { useVersionConflicts, conflictKey } from '../lib/version-conflicts'
 import '../styles/canvas.css'
 
@@ -856,36 +856,6 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
       ]
     })
   }
-  const copy = async (id?: string): Promise<void> => {
-    const component =
-      docRef.current.nodes?.find((n) => n.id === (id ?? [...selection][0])) ??
-      docRef.current.edges?.find((e) => e.id === (id ?? [...edgeSelection][0]))
-    if (!component) return
-    let source: string | undefined
-    if (
-      'type' in component &&
-      component.type === 'file' &&
-      component.subpath &&
-      /\.md$/i.test(String(component.file))
-    )
-      try {
-        source = (await window.zen.readNote(String(component.file))).body
-      } catch {
-        /* explicitly unresolved */
-      }
-    if (
-      await copyWithFallback(
-        formatCanvasContext(
-          path,
-          docRef.current,
-          component,
-          useStore.getState().vaultSettings.projectPathPrefix ?? '',
-          source
-        )
-      )
-    )
-      useToastStore.getState().addToast(`Copied ${path} component ${component.id}`, 'success')
-  }
   const selectedNode = doc.nodes?.find((n) => selection.has(n.id)),
     selectedEdge = doc.edges?.find((e) => edgeSelection.has(e.id))
   const setColor = (color: string): void =>
@@ -977,7 +947,6 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
       e = menu?.edge ? doc.edges?.find((e) => e.id === menu.edge) : selectedEdge
     if (e)
       return [
-        { label: 'Copy Context', onSelect: () => copy(e.id) },
         {
           label: 'Follow connection',
           onSelect: () => {
@@ -1013,7 +982,6 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
       ]
     if (n)
       return [
-        { label: 'Copy Context', onSelect: () => copy(n.id) },
         { label: 'Edit', disabled: locked, onSelect: () => edit(n.id) },
         {
           label: 'Duplicate',
@@ -1134,7 +1102,6 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
       )
         return
       const action = (event as CustomEvent<string>).detail
-      if (action === 'copy') void copy()
       if (action === 'group') groupSelected()
       if (action === 'export') setExportOpen(true)
       if (action === 'jump-group') {
@@ -1506,7 +1473,6 @@ function CanvasEditor({ path, embedded }: { path: string; embedded: boolean }): 
         )}
         {!embedded && (selection.size > 0 || edgeSelection.size > 0) && (
           <div className="zn-canvas-selection-controls">
-            <button onClick={() => void copy()}>Copy Context</button>
             <button
               disabled={locked}
               onClick={() => {

@@ -57,6 +57,10 @@ export interface VaultTask {
    *  default when absent) is a classic `- [ ]` checkbox line. File-tasks
    *  round-trip through frontmatter, not the checkbox, so mutators branch on
    *  this. */
+  syntax?: 'todoseq'
+  keyword?: string
+  parentId?: string
+  progress?: { done: number; total: number }
   kind?: 'inline' | 'file'
   /** ISO YYYY-MM-DD start/scheduled date (frontmatter `scheduled`). File-tasks. */
   scheduled?: string

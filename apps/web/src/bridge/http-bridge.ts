@@ -493,6 +493,9 @@ function getLinks(kind: 'outgoing' | 'backlinks' | 'unresolved', path?: string):
   return jsonRequest<LinkReference[]>('/links/' + kind + (path ? '?path=' + encodeURIComponent(path) : ''))
 }
 function getOrphans(): Promise<{ path: string }[]> { return jsonRequest('/links/orphans') }
+function translationCacheStatus(path: string): Promise<TranslationResult> {
+  return jsonRequest('/translate/status?path=' + encodeURIComponent(path))
+}
 function translateNote(path: string): Promise<TranslationResult> {
   return jsonRequest('/translate', { method: 'POST', body: { path } })
 }
@@ -1501,7 +1504,7 @@ function clipboardReadText(): string {
 // --------------------------------------------------------------------
 
 export const httpBridge: ZenBridge = {
-  getLinks, getOrphans, translateNote, createCanvas,
+  getLinks, getOrphans, translateNote, translationCacheStatus, createCanvas,
   // Workflows and custom templates are the capabilities the SERVER decides;
   // derive them from the cached /capabilities response instead of mutating
   // the const in place, so the UI gate (this) and the request gates

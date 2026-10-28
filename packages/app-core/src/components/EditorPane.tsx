@@ -1,5 +1,5 @@
+import { TranslationButton } from './TranslationButton'
 import { LazyCanvasView as CanvasView } from './CanvasEmbed'
-import { copyEditorContext, rememberEditorContext } from '../lib/context-copy'
 import { MaxaSidePanes } from './MaxaPanels'
 import { VersionConflictBanner } from './VersionConflictBanner'
 import { noteEditingSync, noteEditingLockExtension, refreshNoteEditingLock } from '../lib/note-lifecycle-lock'
@@ -3908,6 +3908,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
         {!isDrawing && (
           <>
             <ToggleGroup mode={mode} onChange={applyPaneMode} />
+            <TranslationButton path={content.path} />
             <div className="mx-2 h-4 w-px bg-paper-300" />
             <IconBtn
               title={
@@ -4542,8 +4543,6 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
               >
                 <div
                   ref={editorSurfaceRef}
-                  onPointerDownCapture={rememberEditorContext}
-                  onFocusCapture={rememberEditorContext}
                   className={[
                     'relative min-h-0 min-w-0',
                     splitMode
@@ -4911,7 +4910,6 @@ function buildEditorContextItems(
     { kind: 'separator' },
     ...highlightItems,
     { label: 'Cut', hint: formatKeyToken('Mod+X'), disabled: !hasSelection, onSelect: cut },
-    { label: 'Copy Context', onSelect: () => copyEditorContext(view) },
     { label: 'Copy', hint: formatKeyToken('Mod+C'), disabled: !hasSelection, onSelect: copy },
     { label: 'Paste', hint: formatKeyToken('Mod+V'), onSelect: paste },
     { kind: 'separator' },
