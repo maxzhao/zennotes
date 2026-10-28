@@ -5,7 +5,6 @@ import { focusEditorNormalMode } from '../lib/editor-focus'
 import { isImeComposing } from '../lib/ime'
 import { ChevronRightIcon } from './icons'
 import { Modal } from './ui/Modal'
-import { LazyPreview as Preview } from './LazyPreview'
 
 const RECENT_COLLAPSED_KEY = 'zen:recent-collapsed'
 function useRecentNotes() {
@@ -215,29 +214,7 @@ function RecentPalette(): JSX.Element {
     </Modal>
   )
 }
-export function MaxaSidePanes(): JSX.Element {
-  const { recent, translation } = useMaxaPanels()
-  const root = useStore((s) => s.vault?.root)
-  return (
-    <>
-      {recent && <RecentPalette />}
-      {translation && translation.root === root && (
-        <aside
-          className="flex min-w-64 w-[40%] resize-x flex-col overflow-auto border-l border-paper-300"
-          aria-label="Translation split"
-        >
-          <header className="flex justify-between border-b border-paper-300 p-3">
-            <h3>{translation.title} — Translation</h3>
-            <button
-              aria-label="Close translation"
-              onClick={() => useMaxaPanels.setState({ translation: null })}
-            >
-              ×
-            </button>
-          </header>
-          <Preview markdown={translation.body} notePath={translation.source} readOnly />
-        </aside>
-      )}
-    </>
-  )
+export function MaxaSidePanes(): JSX.Element | null {
+  const recent = useMaxaPanels((s) => s.recent)
+  return recent ? <RecentPalette /> : null
 }

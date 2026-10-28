@@ -1,13 +1,18 @@
+import { useEffect } from 'react'
 import { create } from 'zustand'
 import { useStore } from '../store'
 import { useToastStore } from './toast'
 import { confirmApp } from './confirm-requests'
+import { findLeaf } from './pane-layout'
 import type { TranslationResult } from '@zennotes/bridge-contract/maxa'
-interface TranslationPane {
+interface PaneTranslation {
   root: string
   source: string
-  title: string
+  sourceBody: string
   body: string
+}
+interface TranslationIntent extends Omit<PaneTranslation, 'body'> {
+  paneId: string
 }
 export type TranslationState = {
   state: 'untranslated' | 'translated' | 'translating' | 'failed'
@@ -15,17 +20,14 @@ export type TranslationState = {
 }
 export const useMaxaPanels = create<{
   recent: boolean
-  translation: TranslationPane | null
+  paneTranslations: Record<string, PaneTranslation>
   translations: Record<string, TranslationState>
-}>(() => ({ recent: false, translation: null, translations: {} }))
+}>(() => ({ recent: false, paneTranslations: {}, translations: {} }))
 export const translationAllowed = (path: string): boolean =>
   /\.(md|markdown|txt|rst|adoc)$/i.test(path) &&
   !path.startsWith('translate-cache/')
 const stateKey = (root: string, path: string): string => root + '\n' + path
-export function translationState(
-  root: string,
-  path: string
-): TranslationState | undefined {
+export function translationState(root: string, path: string): TranslationState | undefined {
   return useMaxaPanels.getState().translations[stateKey(root, path)]
 }
 function setState(root: string, path: string, value: TranslationState): void {
@@ -36,8 +38,39 @@ function setState(root: string, path: string, value: TranslationState): void {
 }
 const revisions = new Map<string, number>()
 const polls = new Map<string, ReturnType<typeof setTimeout>>()
-const openWhenReady = new Map<string, number>()
-let translationRequest = 0
+const requests = new Map<string, TranslationIntent>()
+const openWhenReady = new Map<string, TranslationIntent>()
+function resetPaneTranslation(paneId: string): void {
+  requests.delete(paneId)
+  openWhenReady.delete(paneId)
+  if (!useMaxaPanels.getState().paneTranslations[paneId]) return
+  useMaxaPanels.setState((s) => {
+    const paneTranslations = { ...s.paneTranslations }
+    delete paneTranslations[paneId]
+    return { paneTranslations }
+  })
+}
+export function usePaneTranslation(
+  paneId: string,
+  root: string | undefined,
+  path: string | undefined,
+  sourceBody: string | undefined
+): string | null {
+  const translation = useMaxaPanels((s) => s.paneTranslations[paneId])
+  // Leaving the source (including a content change) also cancels its pending
+  // automatic switch. Neither mode nor translated bodies are persisted.
+  useEffect(() => () => resetPaneTranslation(paneId), [paneId, root, path, sourceBody])
+  return translation?.root === root && translation.source === path &&
+    translation.sourceBody === sourceBody ? translation.body : null
+}
+function currentIntent(intent: TranslationIntent): boolean {
+  const state = useStore.getState()
+  return requests.get(intent.paneId) === intent &&
+    state.vault?.root === intent.root &&
+    findLeaf(state.paneLayout, intent.paneId)?.activeTab === intent.source &&
+    state.noteContents[intent.source]?.body === intent.sourceBody &&
+    !state.noteDirty[intent.source]
+}
 function stopPolling(key: string): void {
   clearTimeout(polls.get(key))
   polls.delete(key)
@@ -47,10 +80,7 @@ function pollStatus(root: string, path: string): void {
   stopPolling(key)
   polls.set(key, setTimeout(() => {
     polls.delete(key)
-    if (useStore.getState().vault?.root !== root) {
-      openWhenReady.delete(key)
-      return
-    }
+    if (useStore.getState().vault?.root !== root) return
     void refreshTranslationStatus(path)
   }, 2000))
 }
@@ -66,22 +96,20 @@ function acceptStatus(root: string, path: string, result: TranslationResult): vo
     return
   }
   stopPolling(key)
-  const request = openWhenReady.get(key)
-  openWhenReady.delete(key)
   if (state === 'failed' && previous === 'translating')
     useToastStore.getState().addToast(error ?? 'Translation failed.', 'error')
-  if (
-    result.cacheHit && request === translationRequest &&
-    !useStore.getState().noteDirty[path]
-  ) {
-    const note = useStore.getState().notes.find((n) => n.path === path)
-    useMaxaPanels.setState({
-      translation: {
-        root, source: path,
-        title: note?.displayTitle || note?.title || path,
-        body: result.body
-      }
-    })
+  for (const [paneId, intent] of openWhenReady) {
+    if (intent.root !== root || intent.source !== path) continue
+    openWhenReady.delete(paneId)
+    if (result.cacheHit && currentIntent(intent)) {
+      useMaxaPanels.setState((s) => ({
+        paneTranslations: {
+          ...s.paneTranslations,
+          [paneId]: { root, source: path, sourceBody: intent.sourceBody, body: result.body }
+        }
+      }))
+    }
+    if (requests.get(paneId) === intent) requests.delete(paneId)
   }
 }
 export async function refreshTranslationStatus(path: string): Promise<void> {
@@ -100,35 +128,42 @@ export async function refreshTranslationStatus(path: string): Promise<void> {
   } catch (e) {
     if (revisions.get(key) === revision && useStore.getState().vault?.root === root) {
       stopPolling(key)
-      openWhenReady.delete(key)
+      for (const [paneId, intent] of openWhenReady)
+        if (intent.root === root && intent.source === path) resetPaneTranslation(paneId)
       const previous = translationState(root, path)?.state
       setState(root, path, { state: 'failed', error: String(e) })
       if (previous === 'translating') useToastStore.getState().addToast(String(e), 'error')
     }
   }
 }
-export async function translateNote(path: string): Promise<void> {
+export async function translateNote(
+  path: string,
+  paneId = useStore.getState().activePaneId
+): Promise<void> {
   const state = useStore.getState(), root = state.vault?.root
-  if (
-    !root || !translationAllowed(path) || !window.zen.translateNote ||
-    !window.zen.translationCacheStatus ||
-    translationState(root, path)?.state === 'translating'
-  ) return
-  const dirty = (): boolean => !!useStore.getState().noteDirty[path]
+  const sourceBody = state.noteContents[path]?.body
+  if (!root || sourceBody === undefined || !translationAllowed(path) ||
+    findLeaf(state.paneLayout, paneId)?.activeTab !== path) return
+  const translation = useMaxaPanels.getState().paneTranslations[paneId]
+  if (translation?.root === root && translation.source === path) {
+    resetPaneTranslation(paneId)
+    return
+  }
+  if (!window.zen.translateNote || !window.zen.translationCacheStatus) return
   const saveFirst = (): void => {
     useToastStore.getState().addToast('Save this note before translating.', 'info')
   }
-  if (dirty()) { saveFirst(); return }
+  if (state.noteDirty[path]) { saveFirst(); return }
   const wasCached = translationState(root, path)?.state === 'translated'
-  const request = ++translationRequest, key = stateKey(root, path)
-  const current = (): boolean => useStore.getState().vault?.root === root && request === translationRequest
+  const intent: TranslationIntent = { paneId, root, source: path, sourceBody }
+  requests.set(paneId, intent)
+  const key = stateKey(root, path)
   revisions.set(key, (revisions.get(key) ?? 0) + 1)
   try {
     const result = await window.zen.translationCacheStatus(path)
-    if (!current()) return
-    if (dirty()) { saveFirst(); return }
+    if (!currentIntent(intent)) return
     if (result.cacheHit) {
-      openWhenReady.set(key, request)
+      openWhenReady.set(paneId, intent)
       acceptStatus(root, path, result)
       return
     }
@@ -139,18 +174,17 @@ export async function translateNote(path: string): Promise<void> {
       description: 'Send the saved note to the translation provider?',
       confirmLabel: 'Translate'
     }))) return
-    if (!current()) return
-    if (dirty()) { saveFirst(); return }
+    if (!currentIntent(intent)) return
     stopPolling(key)
     revisions.set(key, (revisions.get(key) ?? 0) + 1)
-    openWhenReady.set(key, request)
+    openWhenReady.set(paneId, intent)
     setState(root, path, { state: 'translating' })
     await window.zen.translateNote(path)
-    // Query the current saved source, which may have changed while starting.
     if (useStore.getState().vault?.root === root) await refreshTranslationStatus(path)
   } catch (e) {
+    openWhenReady.delete(paneId)
+    requests.delete(paneId)
     stopPolling(key)
-    openWhenReady.delete(key)
     setState(root, path, { state: 'failed', error: String(e) })
     if (useStore.getState().vault?.root === root)
       useToastStore.getState().addToast(String(e), 'error')

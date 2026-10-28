@@ -1,4 +1,5 @@
 import { TranslationButton } from './TranslationButton'
+import { usePaneTranslation } from '../lib/maxa-panels'
 import { LazyCanvasView as CanvasView } from './CanvasEmbed'
 import { MaxaSidePanes } from './MaxaPanels'
 import { VersionConflictBanner } from './VersionConflictBanner'
@@ -935,6 +936,8 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   const notes = useStore((s) => s.notes)
   const assetFiles = useStore((s) => s.assetFiles)
   const vault = useStore((s) => s.vault)
+  const translation = usePaneTranslation(paneId, vault?.root, content?.path, content?.body)
+  const translationMode = translation !== null
   const refreshNotes = useStore((s) => s.refreshNotes)
   const refreshAssets = useStore((s) => s.refreshAssets)
   const indexImportedAssets = useStore((s) => s.indexImportedAssets)
@@ -1366,6 +1369,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     nextMode: PaneMode,
     options: { landing?: EditorLanding } = {}
   ) => {
+    if (translationMode) return
     // Capture the cursor's line NOW, while the editor is still mounted:
     // preview-only mode tears the editor down, and "continue reading where I
     // was editing" needs this anchor to land the preview there. (#543)
@@ -1414,6 +1418,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     })
   }, [
     activeTab,
+    translationMode,
     lockOutlinePreviewSync,
     paneId,
     readingPositionLanding,
@@ -3023,6 +3028,12 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
 
   const handlePaneBodyDragOver = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
+      if (translationMode && (!hasZenItem(e) || hasZenAssetItem(e))) {
+        e.preventDefault()
+        e.stopPropagation()
+        e.dataTransfer.dropEffect = 'none'
+        return
+      }
       if (hasZenAssetItem(e)) {
         e.preventDefault()
         e.stopPropagation()
@@ -3074,7 +3085,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       setPaneDropEdge(null)
       setImageDropIndicatorTop(null)
     },
-    [computePaneEdge, tabsEnabled]
+    [computePaneEdge, tabsEnabled, translationMode]
   )
 
   const insertImportedAssets = useCallback(
@@ -3152,6 +3163,12 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
 
   const handlePaneBodyDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
+      if (translationMode && (!hasZenItem(e) || hasZenAssetItem(e))) {
+        e.preventDefault()
+        e.stopPropagation()
+        e.dataTransfer.dropEffect = 'none'
+        return
+      }
       if (hasZenAssetItem(e)) {
         const payload = readDragPayload(e)
         setAssetDropActive(false)
@@ -3228,7 +3245,8 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       openNoteInPane,
       paneId,
       splitPaneWithTab,
-      tabsEnabled
+      tabsEnabled,
+      translationMode
     ]
   )
 
@@ -3907,8 +3925,8 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       <div className="flex items-center gap-1 text-ink-500">
         {!isDrawing && (
           <>
-            <ToggleGroup mode={mode} onChange={applyPaneMode} />
-            <TranslationButton path={content.path} />
+            <ToggleGroup mode={mode} disabled={translationMode} onChange={applyPaneMode} />
+            <TranslationButton paneId={paneId} path={content.path} translated={translationMode} />
             <div className="mx-2 h-4 w-px bg-paper-300" />
             <IconBtn
               title={
@@ -3983,6 +4001,8 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     )
   }, [
     content,
+    paneId,
+    translationMode,
     mode,
     applyPaneMode,
     connectionsOpen,
@@ -4004,9 +4024,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     exportActiveNotePdf
   ])
 
-  const showEditor = !!content && mode !== 'preview'
-  const showPreview = !!content && mode !== 'edit'
-  const splitMode = mode === 'split'
+  const showEditor = !!content && !translationMode && mode !== 'preview'
+  const showPreview = !!content && !translationMode && mode !== 'edit'
+  const splitMode = !translationMode && mode === 'split'
   const hasTabs = !zenMode && tabsEnabled && tabs.length > 0
   const tabStripMeasureKey = useMemo(
     () =>
@@ -4516,6 +4536,15 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             (isObsidianExcalidrawPath(activeTab) ||
               isObsidianExcalidrawMarkdown(content.body)) ? (
             <ObsidianExcalidrawPrompt path={activeTab} />
+          ) : content && translation !== null ? (
+            <div
+              data-preview-scroll
+              tabIndex={0}
+              aria-label="Note translation"
+              className="min-h-0 min-w-0 flex-1 overflow-y-auto outline-none"
+            >
+              <Preview markdown={translation} notePath={content.path} readOnly />
+            </div>
           ) : content ? (
             <>
               {/* Above both surfaces, so Edit, Preview and split all show it; a
@@ -5104,9 +5133,11 @@ function IconBtn({
 
 function ToggleGroup({
   mode,
+  disabled = false,
   onChange
 }: {
   mode: PaneMode
+  disabled?: boolean
   onChange: (m: PaneMode) => void
 }): JSX.Element {
   const keymapOverrides = useStore((s) => s.keymapOverrides)
@@ -5120,11 +5151,12 @@ function ToggleGroup({
         return (
           <button
             key={option.mode}
+            disabled={disabled}
             onClick={() => onChange(option.mode)}
             title={label}
             aria-label={label}
             className={[
-              'rounded px-2 py-1 transition-colors',
+              'rounded px-2 py-1 transition-colors disabled:opacity-50',
               mode === option.mode
                 ? 'bg-paper-50 text-ink-900 shadow-sm'
                 : 'text-ink-500 hover:text-ink-800'
