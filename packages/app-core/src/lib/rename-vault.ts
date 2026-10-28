@@ -15,13 +15,14 @@ export { vaultFolderName }
 /**
  * Whether the open vault can take a display name: a local vault that is not
  * a temporary folder session (nothing is written into those) and not a remote
- * workspace, whose settings belong to its server.
+ * workspace, whose settings belong to its server. Web vaults are server-managed.
  */
 export function canRenameVault(state: {
   vault: VaultInfo | null
   workspaceMode: WorkspaceMode
 }): boolean {
-  return !!state.vault && !state.vault.temporary && state.workspaceMode !== 'remote'
+  return window.zen.getAppInfo().runtime !== 'web' &&
+    !!state.vault && !state.vault.temporary && state.workspaceMode !== 'remote'
 }
 
 /** Ask for the vault's display name and save it. Resolves to false when the

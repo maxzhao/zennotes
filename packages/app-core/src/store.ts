@@ -3019,6 +3019,7 @@ interface Store {
   remoteWorkspaceProfiles: RemoteWorkspaceProfile[]
   localVaults: LocalVaultEntry[]
   workspaceSetupError: string | null
+  workspaceLoginRequired: boolean
   vaultSettings: VaultSettings
   /** Vault is in `inbox` mode but its root holds notes only `root` mode shows. */
   rootContentHiddenByInboxMode: boolean
@@ -4380,13 +4381,13 @@ function workspaceModeFrom(info: RemoteWorkspaceInfo | null): WorkspaceMode {
   return info?.mode === 'remote' ? 'remote' : 'local'
 }
 
-async function ensureWebServerSession(): Promise<boolean> {
+async function ensureWebServerSession(forceLogin = false): Promise<boolean> {
   if (window.zen.getAppInfo().runtime !== 'web') return true
 
   // Authentication must precede capability discovery: the fork intentionally
   // protects both /capabilities and /session.
   const session = await window.zen.getServerSession()
-  if (session.authenticated || !session.authRequired) return true
+  if (!forceLogin && (session.authenticated || !session.authRequired)) return true
   if (!session.supportsSessionLogin) throw new Error('This server does not support browser session login.')
 
   const token = await promptApp({
@@ -4401,26 +4402,6 @@ async function ensureWebServerSession(): Promise<boolean> {
 
   await window.zen.loginServerSession(token.trim())
   return true
-}
-
-function describeWebServerSetupError(err: unknown): string {
-  const message = err instanceof Error ? err.message : String(err)
-  const normalized = message.toLowerCase()
-  if (
-    normalized.includes('/capabilities') ||
-    normalized.includes('fetch failed') ||
-    normalized.includes('failed to fetch') ||
-    normalized.includes('proxy error') ||
-    normalized.includes('econnrefused') ||
-    normalized.includes('internal server error')
-  ) {
-    return [
-      'ZenNotes could not reach its server API.',
-      'For normal self-hosted use, run `make up` and open http://localhost:7878.',
-      'If you are using the web dev server, make sure `npm run dev:server` is running too.'
-    ].join(' ')
-  }
-  return message
 }
 
 function activeFieldsFrom(
@@ -5756,10 +5737,11 @@ export const useStore = create<Store>((set, get) => {
     }
   }
 
-  const initImpl = async (): Promise<void> => {
+  const initImpl = async (forceLogin = false): Promise<void> => {
     if (get().initialized) return
     const startedAt = performance.now()
-    set({ initialized: true })
+    const isWeb = window.zen.getAppInfo().runtime === 'web'
+    set({ initialized: true, workspaceLoginRequired: false, workspaceSetupError: null })
     let initializedVault = false
     try {
       const remoteWorkspaceProfilesPromise = get().refreshRemoteWorkspaceProfiles()
@@ -5768,13 +5750,14 @@ export const useStore = create<Store>((set, get) => {
         get().refreshWorkspaceContext(),
         window.zen.getAppInfo().runtime === 'web' ? Promise.resolve(null) : window.zen.getServerCapabilities().catch(() => null)
       ])
-      if (!(await ensureWebServerSession())) {
+      if (!(await ensureWebServerSession(forceLogin))) {
         void remoteWorkspaceProfilesPromise
         void localVaultsPromise
         set({
           workspaceMode: workspaceModeFrom(bootWorkspaceInfo),
           remoteWorkspaceInfo: bootWorkspaceInfo,
           workspaceSetupError: null,
+          workspaceLoginRequired: true,
           workspaceRestored: true,
           vaultSettings: DEFAULT_VAULT_SETTINGS
         })
@@ -5785,6 +5768,7 @@ export const useStore = create<Store>((set, get) => {
       }
       if (window.zen.getAppInfo().runtime === 'web') await window.zen.getServerCapabilities()
       const vault = await window.zen.getCurrentVault()
+      if (isWeb && !vault) throw new Error('The server did not provide a vault.')
       // getCurrentVault is what connects a configured remote workspace, so
       // the info fetched above predates the connection: its capabilities and
       // bootError are still null, and keeping it would leave Settings
@@ -5818,12 +5802,21 @@ export const useStore = create<Store>((set, get) => {
         })
       }
     } catch (err) {
+      const loginRequired = isWeb && typeof err === 'object' && err !== null &&
+        'status' in err && err.status === 401
+      // The session can expire between /session and the vault/settings reads.
+      // Re-enter once with a forced login, never turn a 401 into an empty vault.
+      if (loginRequired && !forceLogin) {
+        set({ initialized: false })
+        await initImpl(true)
+        return
+      }
       console.error('init failed', err)
       set({
         workspaceMode: 'local',
         remoteWorkspaceInfo: null,
-        workspaceSetupError:
-          window.zen.getAppInfo().runtime === 'web' ? describeWebServerSetupError(err) : null,
+        workspaceSetupError: isWeb ? humanIpcError(err, 'Could not load the server vault.') : null,
+        workspaceLoginRequired: loginRequired,
         workspaceRestored: true,
         vaultSettings: DEFAULT_VAULT_SETTINGS
       })
@@ -6001,6 +5994,7 @@ export const useStore = create<Store>((set, get) => {
   remoteWorkspaceProfiles: [],
   localVaults: [],
   workspaceSetupError: null,
+  workspaceLoginRequired: false,
   vaultSettings: DEFAULT_VAULT_SETTINGS,
   rootContentHiddenByInboxMode: false,
   rootContentBannerDismissed: false,
@@ -6233,6 +6227,7 @@ export const useStore = create<Store>((set, get) => {
     return true
   },
   renameVault: async (name) => {
+    if (window.zen.getAppInfo().runtime === 'web') return false
     const vault = get().vault
     if (!vault || vault.temporary) return false
     const displayName = normalizeVaultDisplayName(name ?? '')
@@ -11285,6 +11280,11 @@ export const useStore = create<Store>((set, get) => {
   init: () => get().initialized ? Promise.resolve() : runWorkspaceTransition(initImpl, true),
 
   retryWorkspaceBoot: () => runWorkspaceTransition(async () => {
+    if (window.zen.getAppInfo().runtime === 'web') {
+      set({ initialized: false })
+      await initImpl()
+      return
+    }
     set({ workspaceSetupError: null })
     try {
       const vault = await window.zen.retryWorkspaceBoot()
@@ -11304,42 +11304,10 @@ export const useStore = create<Store>((set, get) => {
     }
   }),
 
-  openVaultPicker: () => runWorkspaceTransition(async () => {
+  openVaultPicker: () => window.zen.getAppInfo().runtime === 'web' ? Promise.resolve() : runWorkspaceTransition(async () => {
     await get().flushDirtyNotes()
     set({ workspaceSetupError: null })
-    const capabilities = window.zen.getCapabilities()
-    const appInfo = window.zen.getAppInfo()
-    let vault: VaultInfo | null = null
-
-    try {
-      if (appInfo.runtime === 'web' && !capabilities.supportsLocalFilesystemPickers) {
-        if (!(await ensureWebServerSession())) return
-        await window.zen.getServerCapabilities()
-        const current = await window.zen.getCurrentVault()
-        const enteredPath = await pickServerDirectoryApp(
-          {
-            title: 'Choose Vault Folder',
-            description:
-              'Choose the folder on the server that ZenNotes should use as your vault.',
-            initialPath: current?.root ?? '',
-            confirmLabel: 'Choose Folder'
-          },
-          async (path) => {
-            vault = await window.zen.selectVaultPath(path.trim())
-          }
-        )
-        if (!enteredPath) return
-      } else {
-        vault = await window.zen.pickVault()
-      }
-    } catch (err) {
-      console.error('openVaultPicker failed', err)
-      if (appInfo.runtime === 'web') {
-        set({ workspaceSetupError: describeWebServerSetupError(err) })
-        return
-      }
-      throw err
-    }
+    const vault = await window.zen.pickVault()
 
     if (!vault) return
 

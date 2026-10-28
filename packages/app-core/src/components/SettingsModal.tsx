@@ -4459,7 +4459,7 @@ export function SettingsModal(): JSX.Element {
                         </div>
                       )}
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
+                  {appInfo.runtime !== "web" && <div className="flex flex-wrap items-center gap-2">
                     <button
                       onClick={() =>
                         void (workspaceMode === "remote"
@@ -4496,12 +4496,18 @@ export function SettingsModal(): JSX.Element {
                         Quick Connect…
                       </button>
                     )}
-                  </div>
+                  </div>}
                 </div>
                 {/* Local vaults only (#692): a temporary folder session writes
                     nothing into its folder, and a remote workspace's settings
                     belong to the server. */}
-                {workspaceMode !== "remote" && vault && !vault.temporary && (
+                {appInfo.runtime === "web" && vault && (
+                  <div className="px-5 py-5" {...settingsSearchTargetProps("vault-name")}>
+                    <div className="text-sm font-medium text-ink-900">Vault name</div>
+                    <div className="mt-1 break-words text-xs text-ink-500">{vault.name}</div>
+                  </div>
+                )}
+                {appInfo.runtime !== "web" && workspaceMode !== "remote" && vault && !vault.temporary && (
                   <TextInputRow
                     label="Vault name"
                     description={`What the sidebar, the vault switcher and the title bar call this vault. The folder stays ${vaultFolderName(vault)} on disk; leave the field empty to use that name.`}

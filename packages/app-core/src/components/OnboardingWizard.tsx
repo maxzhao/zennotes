@@ -21,8 +21,10 @@ const STEP_ORDER: StepId[] = ['welcome', 'vim', 'theme', 'vault', 'layout', 'don
  * connected to it, so there is no layout to choose: the wizard goes from the
  * vault straight to the end. A folder on this machine still gets the step.
  */
-function visibleSteps(workspaceMode: WorkspaceMode): StepId[] {
-  return workspaceMode === 'remote' ? STEP_ORDER.filter((step) => step !== 'layout') : STEP_ORDER
+function visibleSteps(workspaceMode: WorkspaceMode, isWeb: boolean): StepId[] {
+  return STEP_ORDER.filter((step) =>
+    !(isWeb && step === 'vault') && !(workspaceMode === 'remote' && step === 'layout')
+  )
 }
 
 /** The step after `step` among `steps`, which may not include `step` itself. */
@@ -145,21 +147,24 @@ export function OnboardingWizard(): JSX.Element {
   const isServerVaultSetup =
     appInfo.runtime === 'web' && !capabilities.supportsLocalFilesystemPickers
   const canConnectRemote = appInfo.runtime === 'desktop' && capabilities.supportsRemoteWorkspace
-  const steps = visibleSteps(workspaceMode)
+  const isWeb = appInfo.runtime === 'web'
+  const steps = visibleSteps(workspaceMode, isWeb)
+  // A server-provided Web vault is not evidence of prior onboarding progress.
+  const hasPickedVault = !!vault && !isWeb
 
   // Start where the user actually needs to act: past the vault step if a
   // vault is already connected (returning user who never finished onboarding).
   const [stepId, setStepId] = useState<StepId>(() =>
-    vault ? stepAfter(steps, 'vault') : 'welcome'
+    hasPickedVault ? stepAfter(steps, 'vault') : 'welcome'
   )
   // Auto-advance past `vault` runs once per session: once the user has moved
   // on, going back to `vault` should be a real visit (so they can pick a
   // different folder) instead of an instant bounce.
-  const autoAdvancedRef = useRef<boolean>(!!vault)
+  const autoAdvancedRef = useRef<boolean>(hasPickedVault)
   // Highest step the user has reached, as an index into STEP_ORDER. The rail
   // uses this to gate forward jumps so unreached steps stay non-interactive.
   const [maxReachedIndex, setMaxReachedIndex] = useState<number>(() =>
-    vault ? STEP_ORDER.indexOf(stepAfter(steps, 'vault')) : 0
+    hasPickedVault ? STEP_ORDER.indexOf(stepAfter(steps, 'vault')) : 0
   )
 
   const stepIndex = steps.indexOf(stepId)
@@ -265,7 +270,7 @@ export function OnboardingWizard(): JSX.Element {
               onNext={goNext}
             />
           )}
-          {stepId === 'vault' && (
+          {!isWeb && stepId === 'vault' && (
             <VaultStep
               isServerVaultSetup={isServerVaultSetup}
               canConnectRemote={canConnectRemote}

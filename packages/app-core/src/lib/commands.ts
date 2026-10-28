@@ -1970,6 +1970,7 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
           : 'Open Vault…',
       category: 'Vault',
       keywords: 'vault local open folder workspace',
+      when: () => window.zen.getAppInfo().runtime !== 'web',
       run: () => getState().openVaultPicker()
     },
     {

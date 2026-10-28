@@ -274,12 +274,8 @@ function platformSync(): NodeJS.Platform {
 // Vault info
 // --------------------------------------------------------------------
 
-async function getCurrentVault(): Promise<VaultInfo | null> {
-  try {
-    return await jsonRequest<VaultInfo | null>('/vault')
-  } catch {
-    return null
-  }
+function getCurrentVault(): Promise<VaultInfo | null> {
+  return jsonRequest<VaultInfo | null>('/vault')
 }
 
 /** Last capabilities this page saw, so the absence reader can consult them

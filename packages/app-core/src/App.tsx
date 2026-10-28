@@ -28,7 +28,7 @@ import { PublishNoteHost } from './components/PublishNoteHost'
 import { CloudConflictReviewHost } from './components/CloudConflictReviewHost'
 import { CloudSettingsConflictHost } from './components/CloudSettingsConflictHost'
 import { ServerDirectoryPickerHost } from './components/ServerDirectoryPickerHost'
-import { IconButton, ToastHost } from './components/ui'
+import { Button, IconButton, ToastHost } from './components/ui'
 import { CloseIcon } from './components/icons'
 import { ExcalidrawEmbedMenuHost } from './components/ExcalidrawEmbedMenuHost'
 import { resolveQuickNoteTitle } from './lib/quick-note-title'
@@ -373,6 +373,11 @@ function App(): JSX.Element {
   const pendingOpenNoteRequestsRef = useRef<Array<{ path: string; vault: ReturnType<typeof useStore.getState>['vault'] }>>([])
   const vault = useStore((s) => s.vault)
   const init = useStore((s) => s.init)
+  const initialized = useStore((s) => s.initialized)
+  const workspaceTransitioning = useStore((s) => s.workspaceTransitioning)
+  const workspaceSetupError = useStore((s) => s.workspaceSetupError)
+  const workspaceLoginRequired = useStore((s) => s.workspaceLoginRequired)
+  const retryWorkspaceBoot = useStore((s) => s.retryWorkspaceBoot)
   const workspaceRestored = useStore((s) => s.workspaceRestored && !s.workspaceTransitioning)
   const searchOpen = useStore((s) => s.searchOpen)
   const linkPopoverOpen = useStore((s) => s.linkPopover !== null)
@@ -1250,6 +1255,36 @@ function App(): JSX.Element {
       end()
     }
   }, [])
+
+  // Web always uses this server's vault. Loading/auth errors must not expose
+  // the desktop welcome screen or let onboarding obscure the login dialog.
+  if (window.zen.getAppInfo().runtime === 'web' &&
+      (!vault || workspaceSetupError || workspaceLoginRequired)) {
+    const loading = !initialized || workspaceTransitioning
+    return (
+      <div className="zn-app-shell w-screen bg-paper-100 text-ink-900">
+        <div className="flex flex-1 items-center justify-center px-6 py-10">
+          <div className="flex max-w-lg flex-col items-center gap-5 text-center" role="status">
+            <h1 className="font-serif text-2xl font-semibold text-ink-900">
+              {loading ? 'Loading server vault…' : workspaceLoginRequired ? 'Sign in required' : 'Could not load server vault'}
+            </h1>
+            {!loading && (
+              <>
+                <p className="text-sm text-ink-600">
+                  {workspaceLoginRequired ? 'Sign in to access the server vault.' : workspaceSetupError ?? 'The server did not provide a vault.'}
+                </p>
+                <Button variant="primary" size="md" onClick={() => void retryWorkspaceBoot()}>
+                  {workspaceLoginRequired ? 'Sign In' : 'Retry'}
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+        <PromptHost />
+        <ToastHost />
+      </div>
+    )
+  }
 
   if (!hasCompletedOnboarding) {
     return (
