@@ -1,3 +1,4 @@
+import { installWebClipboard, writeWebClipboardText } from './clipboard'
 import { VersionConflictError, type WriteOptions, type LinkReference, type TranslationResult } from '@zennotes/bridge-contract/maxa'
 /**
  * HTTP/WebSocket implementation of the `window.zen` API.
@@ -1481,15 +1482,13 @@ async function raycastInstall(): Promise<RaycastExtensionStatus> {
 }
 
 // --------------------------------------------------------------------
-// Clipboard (web build uses navigator.clipboard)
+// Clipboard (Web-only gesture-safe writes; reads remain unchanged)
 // --------------------------------------------------------------------
 
 function clipboardWriteText(text: string): void {
-  try {
-    void navigator.clipboard?.writeText(text)
-  } catch {
-    // ignore
-  }
+  // The void bridge contract has no rejection channel. Failures have already
+  // offered the selected manual-copy dialog; direct API callers still reject.
+  void writeWebClipboardText(text).catch(() => {})
 }
 
 function clipboardReadText(): string {
@@ -1736,5 +1735,6 @@ export const httpBridge: ZenBridge = {
 
 export function installBridge(): void {
   if (typeof window === 'undefined') return
+  installWebClipboard()
   installZenBridge(httpBridge)
 }

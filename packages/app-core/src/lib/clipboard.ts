@@ -1,4 +1,14 @@
 export async function copyWithFallback(text: string): Promise<boolean> {
+  // Web installs one gesture-safe write owner, including its manual dialog.
+  // Do not repeat the fallback/dialog after that owner reports failure.
+  if (window.zen?.getAppInfo?.().runtime === 'web') {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      return false
+    }
+  }
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text)
