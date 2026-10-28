@@ -4,7 +4,7 @@ import { useStore } from "../store";
 import { copyWithFallback } from "./clipboard";
 import { formatContext, type ContextItem } from "./context-format";
 import { useToastStore } from "./toast";
-import { matchesShortcutBinding } from "./keymaps";
+import { matchesShortcutBinding, normalizeShortcutBinding } from "./keymaps";
 
 export interface GrabHit {
   item: ContextItem;
@@ -42,6 +42,7 @@ export function toggleGrabMode(): void {
   }
 }
 export async function copyContext(items: ContextItem[]): Promise<void> {
+  if (!items.length) return;
   const prefix = useStore.getState().vaultSettings.projectPathPrefix ?? "";
   if (await copyWithFallback(formatContext(items, prefix)))
     useToastStore
@@ -113,6 +114,8 @@ export function copyCurrentContext(): void {
 }
 export function useContextCopyRuntime(): void {
   useEffect(() => {
+    const copyBinding = normalizeShortcutBinding("Mod+Alt+C")!;
+    const grabBinding = normalizeShortcutBinding("Mod+Alt+G")!;
     let touch = false;
     const remember = (): void => {
       for (const entry of surfaces.values()) entry.current.remember?.();
@@ -189,11 +192,11 @@ export function useContextCopyRuntime(): void {
         event.stopImmediatePropagation();
         return;
       }
-      if (matchesShortcutBinding(event, "Mod+Alt+G")) {
+      if (matchesShortcutBinding(event, grabBinding)) {
         event.preventDefault();
         event.stopImmediatePropagation();
         toggleGrabMode();
-      } else if (matchesShortcutBinding(event, "Mod+Alt+C")) {
+      } else if (matchesShortcutBinding(event, copyBinding)) {
         event.preventDefault();
         event.stopImmediatePropagation();
         copyCurrentContext();

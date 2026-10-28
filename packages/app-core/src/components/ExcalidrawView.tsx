@@ -2,6 +2,7 @@ import { copyContext, useContextSurface, useGrabMode } from '../lib/context-copy
 import { drawingItems } from '../lib/context-format'
 import { useEffect, useRef, useState } from 'react'
 import type { ComponentProps } from 'react'
+import { flushSync } from 'react-dom'
 import { Excalidraw, serializeAsJSON } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
 import { parseExcalidrawDocument } from '@shared/excalidraw'
@@ -9,6 +10,7 @@ import { useStore } from '../store'
 
 type InitialData = ComponentProps<typeof Excalidraw>['initialData']
 type ExcalidrawProps = ComponentProps<typeof Excalidraw>
+type DrawingAPI = Parameters<NonNullable<ExcalidrawProps['excalidrawAPI']>>[0]
 type OnChange = NonNullable<ExcalidrawProps['onChange']>
 type SceneElements = Parameters<OnChange>[0]
 type AppState = Parameters<OnChange>[1]
@@ -139,26 +141,24 @@ export function ExcalidrawView({ path }: { path: string }): JSX.Element {
   const setFocusedPanel = useStore((s) => s.setFocusedPanel)
   const sessionRef = useRef<DrawingSession | null>(null)
   const contextRoot = useRef<HTMLDivElement>(null)
-  const pointerGesture = useRef(false)
+  const drawingAPI = useRef<{ session: DrawingSession; api: DrawingAPI } | null>(null)
   const selectionOrder = useRef<string[]>([])
-  const pointerFrame = useRef(0)
+  const selectionAtPointerDown = useRef<string[]>([])
+  const pointerCleanup = useRef<(() => void) | null>(null)
   useEffect(() => {
-    const release = (): void => {
-      cancelAnimationFrame(pointerFrame.current)
-      pointerFrame.current = requestAnimationFrame(() => { pointerGesture.current = false })
-    }
-    window.addEventListener('pointerup', release, true)
-    window.addEventListener('pointercancel', release, true)
-    return () => {
-      cancelAnimationFrame(pointerFrame.current)
-      window.removeEventListener('pointerup', release, true)
-      window.removeEventListener('pointercancel', release, true)
-    }
-  }, [])
-  useEffect(() => { selectionOrder.current = []; pointerGesture.current = false }, [path])
+    selectionOrder.current = []
+    return () => { pointerCleanup.current?.() }
+  }, [path])
   const selectedContext = () => {
-    const scene = sessionRef.current?.latest
-    return scene ? drawingItems(path, scene.elements, Object.fromEntries(selectionOrder.current.map(id => [id, true]))) : []
+    const session = sessionRef.current
+    if (!session || session.closed || session.path !== path) return []
+    const api = drawingAPI.current?.session === session ? drawingAPI.current.api : null
+    const elements = api?.getSceneElements() ?? session.latest?.elements
+    const ids = api?.getAppState().selectedElementIds ?? session.latest?.appState.selectedElementIds ?? {}
+    const next = selectionOrder.current.filter(id => ids[id])
+    for (const id of Object.keys(ids)) if (ids[id] && !next.includes(id)) next.push(id)
+    selectionOrder.current = next
+    return elements ? drawingItems(path, elements, Object.fromEntries(next.map(id => [id, true]))) : []
   }
   useContextSurface(contextRoot, { identity: 'draw:' + path, direct: selectedContext })
 
@@ -242,7 +242,37 @@ export function ExcalidrawView({ path }: { path: string }): JSX.Element {
       className="min-h-0 w-full flex-1"
       style={{ height: '100%' }}
       ref={contextRoot}
-      onPointerDownCapture={() => { cancelAnimationFrame(pointerFrame.current); pointerGesture.current = true }}
+      onPointerDownCapture={() => {
+        pointerCleanup.current?.()
+        selectionAtPointerDown.current = selectedContext().map(item => item.key)
+      }}
+      onPointerDown={(event) => {
+        if (!useGrabMode.getState().active) return
+        const before = selectionAtPointerDown.current
+        const pointerId = event.pointerId
+        const cleanup = (): void => {
+          window.removeEventListener('pointerup', release)
+          window.removeEventListener('pointercancel', cancel)
+          pointerCleanup.current = null
+        }
+        const release = (up: PointerEvent): void => {
+          if (up.pointerId !== pointerId) return
+          cleanup()
+          if (session.closed || sessionRef.current !== session || !useGrabMode.getState().active) return
+          // Registered after Excalidraw's window listener. Flush its final
+          // selection updates, then copy synchronously within this gesture.
+          flushSync(() => {})
+          const items = selectedContext()
+          if (items.length && (items.length !== before.length || items.some(item => !before.includes(item.key))))
+            void copyContext(items)
+        }
+        const cancel = (up: PointerEvent): void => {
+          if (up.pointerId === pointerId) cleanup()
+        }
+        pointerCleanup.current = cleanup
+        window.addEventListener('pointerup', release)
+        window.addEventListener('pointercancel', cancel)
+      }}
       data-excalidraw-view
       onMouseDownCapture={() => setFocusedPanel('editor')}
       onFocusCapture={() => setFocusedPanel('editor')}
@@ -254,19 +284,15 @@ export function ExcalidrawView({ path }: { path: string }): JSX.Element {
         key={session.path}
         initialData={initialData}
         theme={excalidrawTheme}
+        excalidrawAPI={api => { drawingAPI.current = { session, api } }}
         onChange={(elements, appState, files) => {
           if (session.closed || session.path !== path) return
           const ids = Object.keys(appState.selectedElementIds ?? {}).filter(id => appState.selectedElementIds[id])
           const previous = selectionOrder.current
           const next = previous.filter(id => ids.includes(id))
           for (const id of ids) if (!next.includes(id)) next.push(id)
-          const changed = next.length !== previous.length || next.some((id, i) => id !== previous[i])
           selectionOrder.current = next
           recordChange(session, elements, appState, files)
-          if (changed && pointerGesture.current && useGrabMode.getState().active) {
-            const items = selectedContext()
-            if (items.length) void copyContext(items)
-          }
         }}
       />
     </div>

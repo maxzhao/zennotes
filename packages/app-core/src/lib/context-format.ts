@@ -168,7 +168,7 @@ export function drawingItems(
           key: id,
           path,
           locator: ` element ${id} ${el.type}${bindings}`,
-          content: text,
+          content: text || undefined,
         },
       ];
     });

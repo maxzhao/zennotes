@@ -3925,7 +3925,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     // closing it, so its tooltip has to say so.
     const tucked = sidePanelFit.tucked
     return (
-      <div className="flex items-center gap-1 text-ink-500">
+      <div className="flex min-w-0 items-center gap-1 text-ink-500 max-sm:overflow-x-auto max-sm:[&>*]:shrink-0">
         {!isDrawing && (
           <>
             <ToggleGroup mode={mode} disabled={translationMode} onChange={applyPaneMode} />
