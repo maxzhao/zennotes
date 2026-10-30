@@ -1,0 +1,64 @@
+/* A single-pane touch reading view must scroll the actual document for
+ * mobile browsers to retract their controls. Editing, split panes, desktop
+ * and installed PWA windows keep the shared app's internal scrolling. */
+@media (pointer: coarse) and (display-mode: browser) {
+  /* Percentage heights can remain tied to the initial small viewport after
+   * browser controls retract. Match the full-height shell's dynamic viewport
+   * through every clipping ancestor, including non-note views. */
+  html,
+  body,
+  #root {
+    height: 100dvh;
+  }
+
+  html:has([data-editor-layout="leaf"] [data-document-preview="true"]) {
+    --zn-document-preview: 1;
+    height: auto;
+    overflow-x: clip;
+    overflow-y: auto;
+
+    body,
+    #root {
+      height: auto;
+      overflow: visible;
+    }
+
+    .zn-app-shell {
+      height: auto;
+      min-height: 100vh;
+      min-height: 100dvh;
+    }
+
+    .zn-app-shell > .flex.min-h-0 {
+      align-items: flex-start;
+    }
+
+    [data-zen-sidebar],
+    .zn-app-shell > .flex.min-h-0 > .glass-column {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      height: 100dvh;
+    }
+
+    [data-preview-surfaces],
+    [data-preview-scroll] {
+      overflow: visible;
+    }
+
+    [data-preview-header] {
+      display: block;
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      background: rgb(var(--z-bg));
+    }
+
+    [data-editor-status] {
+      position: sticky;
+      bottom: 0;
+      z-index: 30;
+      background: rgb(var(--z-bg));
+    }
+  }
+}

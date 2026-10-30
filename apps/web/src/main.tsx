@@ -2,6 +2,7 @@ import { renderZenNotesApp } from '@zennotes/app-core/main'
 import { installBridge, webBasePath } from './bridge/http-bridge'
 import { renderExportNoteWindow } from './export-window'
 import { registerServiceWorker } from './register-service-worker'
+import './browser-scroll.css'
 
 installBridge()
 registerServiceWorker()

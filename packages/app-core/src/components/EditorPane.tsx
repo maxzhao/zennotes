@@ -241,7 +241,9 @@ import {
   nextOutlinePreviewSyncLockUntil,
   outlineHeadingTextOffset,
   planPreviewJump,
+  previewScrollElement,
   previewScrollTopForHeading,
+  previewViewportRect,
   previewShowsNote,
   previewShowsSourceLine,
   previewVisibleSourceLines,
@@ -972,6 +974,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     isActive ? s.editorCursorPosition : null
   )
   const sidebarOpen = useStore((s) => s.sidebarOpen)
+  const singlePane = useStore((s) => s.paneLayout.kind === 'leaf')
   const zenMode = useStore((s) => s.zenMode)
   // With the title bar off, the top pane's chrome is what moves the window.
   const runtime = window.zen.getAppInfo().runtime
@@ -1271,7 +1274,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     const previewEl = previewScrollRef.current
     const next: TabScrollPosition = {
       editor: view?.scrollDOM.scrollTop ?? prev?.editor ?? 0,
-      preview: previewEl?.scrollTop ?? prev?.preview ?? 0
+      preview: previewEl ? previewScrollElement(previewEl).scrollTop : prev?.preview ?? 0
     }
     const selection = view && viewPathRef.current === path ? view.state.selection.main : null
     if (selection) {
@@ -1550,10 +1553,11 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     const heading = findRenderedHeadingForOutlineLine(previewEl, items, line)
     if (!heading) return false
     const nextTop = previewScrollTopForHeading(previewEl, heading, OUTLINE_JUMP_TOP_MARGIN)
+    const scroller = previewScrollElement(previewEl)
     lockOutlinePreviewSync(OUTLINE_JUMP_SCROLL_SYNC_SETTLE_MS)
-    if (Math.abs(previewEl.scrollTop - nextTop) >= 1) {
+    if (Math.abs(scroller.scrollTop - nextTop) >= 1) {
       ignorePreviewScrollRef.current = true
-      previewEl.scrollTo({ top: nextTop, behavior: 'auto' })
+      scroller.scrollTo({ top: nextTop, behavior: 'auto' })
     }
     return true
   }, [content?.body, lockOutlinePreviewSync, mode])
@@ -1662,8 +1666,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     const nextTop = anchor
       ? scrollTopForElementRelativeTop(previewEl, anchor, topMargin)
       : 0
-    previewEl.scrollTop = nextTop
-    lastProgrammaticPreviewTopRef.current = previewEl.scrollTop
+    const scroller = previewScrollElement(previewEl)
+    scroller.scrollTop = nextTop
+    lastProgrammaticPreviewTopRef.current = scroller.scrollTop
     return true
   }, [])
 
@@ -1694,7 +1699,8 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     // it if the user has scrolled since our last programmatic set.
     const restore = previewRestoreTargetRef.current
     if (restore && restore.path === content?.path) {
-      const el = previewScrollRef.current
+      const previewEl = previewScrollRef.current
+      const el = previewEl ? previewScrollElement(previewEl) : null
       const last = lastProgrammaticPreviewTopRef.current
       if (el && (last == null || Math.abs(el.scrollTop - last) < 2)) {
         el.scrollTop = restore.top
@@ -1966,8 +1972,8 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     }
     // Match the editor probe: a heading counts as active once it sits
     // inside the upper ~25% band of the preview viewport.
-    const rect = dom.getBoundingClientRect()
-    const threshold = rect.top + Math.min(140, rect.height * 0.25)
+    const rect = previewViewportRect(dom)
+    const threshold = rect.top + Math.min(140, (rect.bottom - rect.top) * 0.25)
     let activeIndex = -1
     for (let i = 0; i < headings.length; i++) {
       if (headings[i].getBoundingClientRect().top <= threshold) activeIndex = i
@@ -2903,8 +2909,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       if (plan.kind === 'restore') {
         previewRestoreTargetRef.current = { path: content.path, top: plan.top }
         if (rendered && previewEl) {
-          previewEl.scrollTop = plan.top
-          lastProgrammaticPreviewTopRef.current = previewEl.scrollTop
+          const scroller = previewScrollElement(previewEl)
+          scroller.scrollTop = plan.top
+          lastProgrammaticPreviewTopRef.current = scroller.scrollTop
         }
       } else if (rendered && scrollPreviewToSourceLine(plan.line)) {
         previewRestoreTargetRef.current = null
@@ -4151,14 +4158,15 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   // leaving Preview still lands where the reader is. (#822)
   const handlePreviewRequestEdit = useCallback((request?: PreviewEditRequest | null) => {
     const previewEl = previewScrollRef.current
+    const viewport = previewEl ? previewViewportRect(previewEl) : null
     const landing: EditorLanding =
-      request?.sourceLine != null && previewEl
+      request?.sourceLine != null && viewport
         ? {
             line: request.sourceLine,
             topMargin: editorLandingTopMargin(
               request.blockClientTop,
-              previewEl.getBoundingClientRect().top,
-              previewEl.clientHeight,
+              viewport.top,
+              viewport.bottom - viewport.top,
               OUTLINE_JUMP_TOP_MARGIN
             )
           }
@@ -4215,13 +4223,14 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     const dom = previewScrollRef.current
     if (!dom) return
     const handler = (): void => scheduleActiveOutlineUpdate(computeActiveFromPreview)
-    dom.addEventListener('scroll', handler, { passive: true })
+    const scrollTarget = previewScrollElement(dom) === dom ? dom : dom.ownerDocument
+    scrollTarget.addEventListener('scroll', handler, { passive: true })
     // Wait a frame so the preview has had a chance to render headings
     // for the current `previewMarkdown` before we measure.
     const initial = requestAnimationFrame(() => computeActiveFromPreview())
     return () => {
       cancelAnimationFrame(initial)
-      dom.removeEventListener('scroll', handler)
+      scrollTarget.removeEventListener('scroll', handler)
       if (activeOutlineFrameRef.current != null) {
         cancelAnimationFrame(activeOutlineFrameRef.current)
         activeOutlineFrameRef.current = null
@@ -4234,7 +4243,8 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     outlineItems,
     outlineOpen,
     previewMarkdown,
-    scheduleActiveOutlineUpdate
+    scheduleActiveOutlineUpdate,
+    singlePane
   ])
 
   // Remember this tab's scroll position as the user scrolls, so switching
@@ -4248,6 +4258,10 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     if (!path) return
     const editorEl = editorReady ? viewRef.current?.scrollDOM ?? null : null
     const previewEl = previewScrollRef.current
+    const previewScroller = previewEl ? previewScrollElement(previewEl) : null
+    const previewScrollTarget = previewEl && previewScroller !== previewEl
+      ? previewEl.ownerDocument
+      : previewEl
     if (!editorEl && !previewEl) return
 
     let frame = 0
@@ -4261,7 +4275,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
         // Keep the other surface's value when one isn't mounted (e.g.
         // preview-only mode has no editor scroller), so we don't clobber it.
         editor: editorEl?.scrollTop ?? prev?.editor ?? 0,
-        preview: previewEl?.scrollTop ?? prev?.preview ?? 0
+        preview: previewScroller?.scrollTop ?? prev?.preview ?? 0
       }
       if (selection) {
         next.editorSelectionAnchor = selection.anchor
@@ -4274,14 +4288,14 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       frame = requestAnimationFrame(captureNow)
     }
     editorEl?.addEventListener('scroll', scheduleCapture, { passive: true })
-    previewEl?.addEventListener('scroll', scheduleCapture, { passive: true })
+    previewScrollTarget?.addEventListener('scroll', scheduleCapture, { passive: true })
     return () => {
       if (frame) cancelAnimationFrame(frame)
       captureNow()
       editorEl?.removeEventListener('scroll', scheduleCapture)
-      previewEl?.removeEventListener('scroll', scheduleCapture)
+      previewScrollTarget?.removeEventListener('scroll', scheduleCapture)
     }
-  }, [content?.path, mode, editorReady])
+  }, [content?.path, mode, editorReady, singlePane])
 
   // Restore a note tab's remembered editor state on (re)activation. Keyed on the
   // active path, which flips note → (diagram tab) → note even though the
@@ -4344,8 +4358,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       previewRestoreTargetRef.current = { path, top: remembered.preview }
       const previewEl = previewScrollRef.current
       if (previewEl) {
-        previewEl.scrollTop = remembered.preview
-        lastProgrammaticPreviewTopRef.current = previewEl.scrollTop
+        const scroller = previewScrollElement(previewEl)
+        scroller.scrollTop = remembered.preview
+        lastProgrammaticPreviewTopRef.current = scroller.scrollTop
       }
     }
     return () => {
@@ -4386,6 +4401,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
         setFocusedPanel('editor')
       }}
     >
+      <div data-preview-header className="contents">
       {hasTabs && (
         <div className={tabStripHeaderClass}>
           <div className="flex shrink-0 items-center gap-0.5 self-center">
@@ -4482,6 +4498,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
           {toolbar}
         </header>
       )}
+      </div>
       <div ref={paneRowRef} className="min-h-0 min-w-0 flex flex-1">
         <div
           ref={paneBodyRef}
@@ -4543,6 +4560,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
           ) : content && translation !== null ? (
             <div
               data-preview-scroll
+              data-document-preview="true"
               tabIndex={0}
               aria-label="Note translation"
               className="min-h-0 min-w-0 flex-1 overflow-y-auto outline-none"
@@ -4569,6 +4587,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
                 />
               )}
               <div
+                data-preview-surfaces
                 className={[
                   'min-h-0 min-w-0 flex-1 overflow-hidden',
                   splitMode ? 'flex flex-row' : 'flex flex-col'
@@ -4634,6 +4653,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
                   <div
                     ref={previewScrollRef}
                     data-preview-scroll
+                    data-document-preview={!showEditor}
                     tabIndex={0}
                     aria-label="Note preview"
                     className={[

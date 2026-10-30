@@ -1763,7 +1763,7 @@ export function Editor(): JSX.Element {
   }, [vimInsertEscape]);
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col">
+    <section data-editor-layout={paneLayout.kind} className="flex min-w-0 flex-1 flex-col">
       <div className="flex min-h-0 min-w-0 flex-1">
         <PaneTreeView node={paneLayout} />
       </div>

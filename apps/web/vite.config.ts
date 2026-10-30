@@ -316,6 +316,18 @@ export default defineConfig({
       }
     }
   },
+  // Preview serves built /assets/* locally. Inheriting the dev server's
+  // legacy /assets proxy would request those chunks from an older backend
+  // bundle instead, which can return HTML and leave the page blank.
+  preview: {
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:7878',
+        changeOrigin: true,
+        ws: true
+      }
+    }
+  },
   plugins: [onigurumaDataUrl(), harperWasmAsset(), react(), excalidrawFonts()],
   // Typst ships a WASM compiler loaded lazily via `?url` + dynamic import; keep
   // it out of the esbuild dep pre-bundler so the wasm glue stays intact. The

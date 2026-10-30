@@ -3,6 +3,27 @@ import type { OutlineItem } from './outline'
 
 const RENDERED_HEADING_SELECTOR = 'h1, h2, h3, h4, h5, h6'
 
+/** The Web client's single-pane touch reading view scrolls the document. */
+export function previewScrollElement(preview: HTMLElement): HTMLElement {
+  const view = preview.ownerDocument?.defaultView
+  if (view?.getComputedStyle(preview).getPropertyValue('--zn-document-preview').trim() === '1') {
+    return (preview.ownerDocument.scrollingElement as HTMLElement | null) ?? preview
+  }
+  return preview
+}
+
+export function previewViewportRect(preview: HTMLElement): { top: number; bottom: number } {
+  if (previewScrollElement(preview) === preview) return preview.getBoundingClientRect()
+  const pane = preview.closest('[data-pane-id]')
+  const header = pane?.querySelector('[data-preview-header]')?.getBoundingClientRect()
+  const status = pane?.closest('[data-editor-layout]')
+    ?.querySelector('[data-editor-status]')?.getBoundingClientRect()
+  return {
+    top: Math.max(0, header?.bottom ?? 0),
+    bottom: Math.min(preview.ownerDocument.documentElement.clientHeight, status?.top ?? Infinity)
+  }
+}
+
 /** The slice of a store `NoteJumpLocation` the reading view needs. */
 export interface PreviewJumpRequest {
   editorSelectionAnchor: number
@@ -65,7 +86,7 @@ export function previewVisibleSourceLines(
   previewScrollEl: HTMLElement | null
 ): PreviewVisibleSourceLines | null {
   if (!previewScrollEl) return null
-  const viewport = previewScrollEl.getBoundingClientRect()
+  const viewport = previewViewportRect(previewScrollEl)
   let top: number | null = null
   // Stamps nest: a list carries its first line and every item inside it its
   // own (#953). They come in document order, so a later stamp that still
@@ -217,10 +238,11 @@ export function scrollTopForElementRelativeTop(
   element: HTMLElement,
   relativeTop: number
 ): number {
-  const containerRect = scrollEl.getBoundingClientRect()
+  const scroller = previewScrollElement(scrollEl)
+  const containerRect = previewViewportRect(scrollEl)
   const elementRect = element.getBoundingClientRect()
-  const maxTop = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight)
-  const nextTop = scrollEl.scrollTop + elementRect.top - containerRect.top - relativeTop
+  const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+  const nextTop = scroller.scrollTop + elementRect.top - containerRect.top - relativeTop
   return Math.max(0, Math.min(maxTop, nextTop))
 }
 

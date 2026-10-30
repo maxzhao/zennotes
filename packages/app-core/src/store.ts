@@ -2,6 +2,7 @@ import { mutateTodoSeq, withTodoMutationState } from '@shared/todoseq'
 import { useVersionConflicts, VersionConflictError, conflictKey } from './lib/version-conflicts'
 import type { LocalVaultRelocation } from './lib/workspace-relocation'
 import { captureNavigationContext } from './lib/navigation-context'
+import { previewScrollElement } from './lib/preview-outline-jump'
 import { runWorkspaceTransition, workspaceGeneration, workspaceWritesBlocked, isWorkspaceTransitionPending } from './lib/workspace-transition'
 import { isNoteEditingLocked, lockNoteEditing } from './lib/note-lifecycle-lock'
 import { create } from 'zustand'
@@ -1867,9 +1868,10 @@ export interface CreateDatabaseOptions {
 
 function getVisiblePreviewScrollElement(): HTMLElement | null {
   if (typeof document === 'undefined') return null
-  return [...document.querySelectorAll<HTMLElement>('[data-preview-scroll]')].find(
+  const preview = [...document.querySelectorAll<HTMLElement>('[data-preview-scroll]')].find(
     (el) => el.getClientRects().length > 0
-  ) ?? null
+  )
+  return preview ? previewScrollElement(preview) : null
 }
 
 /**

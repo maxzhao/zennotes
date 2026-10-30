@@ -70,6 +70,7 @@ export function StatusBar({ note }: { note: NoteContent | null }): JSX.Element {
 
   return (
     <div
+      data-editor-status
       className="flex h-8 shrink-0 items-center justify-between gap-2 px-3 text-xs text-ink-500 sm:gap-5 sm:px-6"
       style={{ borderTop: "1px solid var(--glass-stroke)" }}
     >
