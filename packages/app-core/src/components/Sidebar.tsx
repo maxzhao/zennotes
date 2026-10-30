@@ -1,4 +1,5 @@
 import { createCanvas } from '../lib/canvas-actions'
+import type { PeerProject } from '@zennotes/bridge-contract/maxa'
 import { SidebarRecent } from './MaxaPanels'
 import { runNoteLifecycleAction, runNoteBatchAction, runEmptyTrash } from "../lib/note-lifecycle-actions";
 import {
@@ -1030,30 +1031,48 @@ export function Sidebar(): JSX.Element {
   const [vaultMenu, setVaultMenu] = useState<{ x: number; y: number } | null>(
     null,
   );
+  // Sibling servers listed by the deployment (Web only). Each opens in a new
+  // tab on the host already in use; an older server without /peers lists none.
+  const [peerProjects, setPeerProjects] = useState<PeerProject[]>([]);
+  const refreshPeerProjects = useCallback(async (): Promise<void> => {
+    if (!window.zen.listPeerProjects) return;
+    try {
+      setPeerProjects(await window.zen.listPeerProjects());
+    } catch {
+      setPeerProjects([]);
+    }
+  }, []);
+  const hasPeerProjects = peerProjects.some((peer) => !peer.current);
+  const canOpenVaultMenu = canSwitchVaults || hasPeerProjects;
 
   useEffect(() => {
     if (canSwitchLocalVaults) void refreshLocalVaults();
     if (canUseRemoteWorkspaces) void refreshRemoteWorkspaceProfiles();
+    void refreshPeerProjects();
   }, [
     canSwitchLocalVaults,
     canUseRemoteWorkspaces,
     refreshLocalVaults,
+    refreshPeerProjects,
     refreshRemoteWorkspaceProfiles,
   ]);
 
   const openVaultSwitcher = useCallback(
     (event: React.MouseEvent<HTMLElement>): void => {
-      if (!canSwitchVaults) return;
+      if (!canOpenVaultMenu) return;
       event.preventDefault();
       if (canSwitchLocalVaults) void refreshLocalVaults();
       if (canUseRemoteWorkspaces) void refreshRemoteWorkspaceProfiles();
+      if (hasPeerProjects) void refreshPeerProjects();
       setVaultMenu({ x: event.clientX, y: event.clientY });
     },
     [
+      canOpenVaultMenu,
       canSwitchLocalVaults,
-      canSwitchVaults,
       canUseRemoteWorkspaces,
+      hasPeerProjects,
       refreshLocalVaults,
+      refreshPeerProjects,
       refreshRemoteWorkspaceProfiles,
     ],
   );
@@ -2649,7 +2668,22 @@ export function Sidebar(): JSX.Element {
   const vaultMenuItems = useMemo<ContextMenuItem[]>(() => {
     const items: ContextMenuItem[] = [];
 
-    if (vaultSwitcherEntries.length === 0) {
+    if (hasPeerProjects) {
+      for (const peer of peerProjects) {
+        items.push({
+          label: peer.name,
+          hint: peer.current ? "Current" : peer.online ? `:${peer.port}` : "Offline",
+          icon: <VaultBadge name={peer.name} size={16} />,
+          disabled: peer.current || !peer.online,
+          // Synchronous so the click's user activation still allows the tab.
+          onSelect: () => {
+            const url = new URL("/", window.location.href);
+            url.port = String(peer.port);
+            window.open(url.toString(), "_blank", "noopener");
+          },
+        });
+      }
+    } else if (vaultSwitcherEntries.length === 0) {
       items.push({
         label: "No vaults yet",
         disabled: true,
@@ -2729,8 +2763,10 @@ export function Sidebar(): JSX.Element {
     closeVault,
     connectRemoteWorkspace,
     connectRemoteWorkspaceProfile,
+    hasPeerProjects,
     openLocalVault,
     openVaultPicker,
+    peerProjects,
     refreshLocalVaults,
     vaultSwitcherEntries,
   ]);
@@ -2794,7 +2830,7 @@ export function Sidebar(): JSX.Element {
   // rendered me" from "I re-rendered alone" (see useStableSidebarIdxBase).
   const idxPass: SidebarIdxPass = {};
   const vimCursor = isSidebarFocused ? sidebarCursorIndex : -1;
-  const vaultHeaderIdx = canSwitchVaults ? idxCounter.current.value++ : -1;
+  const vaultHeaderIdx = canOpenVaultMenu ? idxCounter.current.value++ : -1;
   const vaultHeaderVimHighlight = vimCursor === vaultHeaderIdx;
   // VimNav clamps cursor position via Math.min/Math.max on each
   // keystroke using the actual DOM element count — no extra clamping needed.
@@ -3049,7 +3085,7 @@ export function Sidebar(): JSX.Element {
             : ""
         }`}
       >
-        {canSwitchVaults ? (
+        {canOpenVaultMenu ? (
           <button
             type="button"
             onClick={openVaultSwitcher}
@@ -3058,8 +3094,8 @@ export function Sidebar(): JSX.Element {
               "group flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 py-1 text-left transition-colors hover:bg-paper-200/70",
               vaultHeaderVimHighlight ? "vim-cursor" : "",
             ].join(" ")}
-            title="Switch vault"
-            aria-label="Switch vault"
+            title={canSwitchVaults ? "Switch vault" : "Open another project"}
+            aria-label={canSwitchVaults ? "Switch vault" : "Open another project"}
             data-sidebar-idx={vaultHeaderIdx}
             data-sidebar-type="vault"
           >

@@ -1,5 +1,5 @@
 import { installWebClipboard, writeWebClipboardText } from './clipboard'
-import { VersionConflictError, type WriteOptions, type LinkReference, type TranslationResult } from '@zennotes/bridge-contract/maxa'
+import { VersionConflictError, type WriteOptions, type LinkReference, type TranslationResult, type PeerProject } from '@zennotes/bridge-contract/maxa'
 /**
  * HTTP/WebSocket implementation of the `window.zen` API.
  *
@@ -495,6 +495,10 @@ function translationCacheStatus(path: string): Promise<TranslationResult> {
 }
 function translateNote(path: string): Promise<TranslationResult> {
   return jsonRequest('/translate', { method: 'POST', body: { path, async: true } })
+}
+async function listPeerProjects(): Promise<PeerProject[]> {
+  const result = await jsonRequest<{ projects?: PeerProject[] }>('/peers')
+  return Array.isArray(result.projects) ? result.projects : []
 }
 function createCanvas(folder: NoteFolder, title?: string, subpath?: string): Promise<NoteMeta> {
   return jsonRequest('/canvas/create', { method: 'POST', body: { folder, title, subpath } })
@@ -1499,7 +1503,7 @@ function clipboardReadText(): string {
 // --------------------------------------------------------------------
 
 export const httpBridge: ZenBridge = {
-  getLinks, getOrphans, translateNote, translationCacheStatus, createCanvas,
+  getLinks, getOrphans, translateNote, translationCacheStatus, createCanvas, listPeerProjects,
   // Workflows and custom templates are the capabilities the SERVER decides;
   // derive them from the cached /capabilities response instead of mutating
   // the const in place, so the UI gate (this) and the request gates

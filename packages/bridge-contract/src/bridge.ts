@@ -1,4 +1,4 @@
-import type { LinkReference, WriteOptions, TranslationResult } from './maxa.js'
+import type { LinkReference, WriteOptions, TranslationResult, PeerProject } from './maxa.js'
 import type { ZenPlatform } from './platform.js'
 import type {
   AppUpdateState,
@@ -390,6 +390,7 @@ export interface ZenBridge {
   getOrphans?(): Promise<{ path: string }[]>
   translationCacheStatus?(path: string): Promise<TranslationResult>
   translateNote?(path: string): Promise<TranslationResult>
+  listPeerProjects?(): Promise<PeerProject[]>
   createCanvas?(folder: NoteFolder, title?: string, subpath?: string): Promise<NoteMeta>
   writeNote(relPath: string, body: string, options?: WriteOptions): Promise<NoteMeta>
   appendToNote(relPath: string, body: string, position: 'start' | 'end'): Promise<NoteMeta>

@@ -30,6 +30,14 @@ export class VersionConflictError extends Error {
     this.name = 'VersionConflictError'
   }
 }
+/** A sibling server listed by the deployment (`GET /peers`). Clients link to
+ *  it by port on the host they already use; each server keeps its own login. */
+export interface PeerProject {
+  name: string
+  port: number
+  current: boolean
+  online: boolean
+}
 export interface TranslationResult {
   cacheHit: boolean
   state: 'untranslated' | 'translated' | 'translating' | 'failed'
