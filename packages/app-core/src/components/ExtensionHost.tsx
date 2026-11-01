@@ -4,6 +4,7 @@ import { create } from 'zustand'
 import type { VaultChangeEvent } from '@shared/ipc'
 import { useStore } from '../store'
 import { parseExtensionTab } from '../lib/extension-path'
+import { focusEditorNormalMode } from '../lib/editor-focus'
 import { ChevronRightIcon } from './icons'
 
 interface Extension {
@@ -263,9 +264,17 @@ export function ExtensionTab({ path }: { path: string }): JSX.Element {
     </div>
   )
 }
+function openExtensionView(path: string): void {
+  const state = useStore.getState()
+  void state
+    .openNoteInPane(state.activePaneId, path)
+    .then(() => focusEditorNormalMode())
+}
 export function SidebarExtensions(): JSX.Element | null {
   const vault = useStore((s) => s.vault)
+  const activePath = useStore((s) => s.selectedPath)
   const restored = useStore((s) => s.workspaceRestored)
+  const transitioning = useStore((s) => s.workspaceTransitioning)
   const extensions = useExtensions((s) => s.extensions)
   const loaded = useExtensions((s) => s.loaded)
   const notice = useExtensions((s) => s.notice)
@@ -310,7 +319,12 @@ export function SidebarExtensions(): JSX.Element | null {
     return () => document.documentElement.removeAttribute('data-extensions')
   }, [extensions.length])
   React.useEffect(() => {
-    if (window.zen.getAppInfo().runtime !== 'web' || !loaded || !restored)
+    if (
+      window.zen.getAppInfo().runtime !== 'web' ||
+      !loaded ||
+      !restored ||
+      transitioning
+    )
       return
     const openHash = () => {
       if (!location.hash.startsWith('#ext/')) return
@@ -325,16 +339,12 @@ export function SidebarExtensions(): JSX.Element | null {
         useExtensions.setState({ notice: '未知扩展或视图' })
         return
       }
-      const state = useStore.getState()
-      void state.openNoteInPane(
-        state.activePaneId,
-        `ext:${parsed.name}/${parsed.view}`
-      )
+      openExtensionView(`ext:${parsed.name}/${parsed.view}`)
     }
     openHash()
     window.addEventListener('hashchange', openHash)
     return () => window.removeEventListener('hashchange', openHash)
-  }, [loaded, restored, extensions])
+  }, [loaded, restored, transitioning, extensions])
   if (!extensions.length && !notice) return null
   return (
     <section aria-label="Extensions" className="shrink-0 px-3 py-1">
@@ -387,22 +397,26 @@ export function SidebarExtensions(): JSX.Element | null {
                   {extension.error}
                 </p>
               ) : (
-                extension.views?.map((view) => (
-                  <button
-                    key={view.id}
-                    type="button"
-                    className="flex h-7 w-full items-center rounded px-2 text-left text-xs text-ink-700 hover:bg-paper-200/70"
-                    onClick={() => {
-                      const state = useStore.getState()
-                      void state.openNoteInPane(
-                        state.activePaneId,
-                        `ext:${extension.name}/${view.id}`
-                      )
-                    }}
-                  >
-                    <span className="truncate">{view.title}</span>
-                  </button>
-                ))
+                extension.views?.map((view) => {
+                  const path = `ext:${extension.name}/${view.id}`
+                  const active = activePath === path
+                  return (
+                    <button
+                      key={view.id}
+                      type="button"
+                      aria-current={active ? 'page' : undefined}
+                      className={[
+                        'flex h-7 w-full items-center rounded px-2 text-left text-xs',
+                        active
+                          ? 'bg-paper-300/70 text-ink-900 font-medium'
+                          : 'text-ink-700 hover:bg-paper-200/70'
+                      ].join(' ')}
+                      onClick={() => openExtensionView(path)}
+                    >
+                      <span className="truncate">{view.title}</span>
+                    </button>
+                  )
+                })
               )}
             </div>
           ))}
