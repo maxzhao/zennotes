@@ -6347,3 +6347,16 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
 [data-grab-mode] .zn-canvas iframe {
   pointer-events: none;
 }
+
+/* Only extension-capable Web clients expose the additive schema-1 tokens. */
+:root[data-extensions] {
+  --ext-bg: rgb(var(--z-bg));
+  --ext-surface: rgb(var(--z-bg-1));
+  --ext-fg: rgb(var(--z-fg));
+  --ext-muted: rgb(var(--z-grey-1));
+  --ext-border: rgb(var(--z-bg-3));
+  --ext-accent: rgb(var(--z-accent));
+  --ext-danger: rgb(var(--z-red));
+  --ext-success: rgb(var(--z-green));
+  --ext-warning: rgb(var(--z-yellow));
+}

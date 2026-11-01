@@ -1,3 +1,5 @@
+import { ExtensionTab, useExtensions } from './ExtensionHost'
+import { isExtensionTabPath, parseExtensionTab } from '../lib/extension-path'
 import { GrabButton } from '../lib/context-copy'
 import { useEditorContext } from '../lib/context-markdown'
 import { TranslationButton } from './TranslationButton'
@@ -3315,6 +3317,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   )
 
   /* ---------- Tab rendering ---------- */
+  const extensions = useExtensions((s) => s.extensions)
   const tabItems = useMemo(
     () => {
       const pinnedSet = new Set(pinnedTabs)
@@ -3335,6 +3338,11 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
           isAsset: false,
           isDiagram: false,
           isDatabase: false
+        }
+        if (isExtensionTabPath(path)) {
+          const parsed = parseExtensionTab(path)!
+          const extension = extensions.find((e) => e.name === parsed.name)
+          return { ...base, title: extension?.views?.find((v) => v.id === parsed.view)?.title ?? parsed.view, isWorkflows: true }
         }
         if (isWorkflowsTabPath(path)) {
           return {
@@ -3436,7 +3444,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
         }
       })
     },
-    [tabs, pinnedTabs, previewTab, content, notes, folderLabels.quick, folderLabels.archive, folderLabels.trash, folderLabels.tasks]
+    [extensions, tabs, pinnedTabs, previewTab, content, notes, folderLabels.quick, folderLabels.archive, folderLabels.trash, folderLabels.tasks]
   )
 
   const tabMenuItems = useMemo<ContextMenuItem[]>(() => {
@@ -3500,6 +3508,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       isQuickNotesTabPath(path) ||
       isWorkflowsTabPath(path) ||
       isAtlasTabPath(path) ||
+      isExtensionTabPath(path) ||
       isTagsTabPath(path) ||
       isHelpTabPath(path) ||
       isArchiveTabPath(path) ||
@@ -4515,7 +4524,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             <div className="pointer-events-none absolute inset-3 z-20 rounded-xl border-2 border-dashed border-accent/55 bg-accent/8" />
           )}
           {content && <VersionConflictBanner path={content.path} />}
-          {isWorkflowsTabPath(activeTab) ? (
+          {isExtensionTabPath(activeTab) ? (
+            <ExtensionTab key={activeTab} path={activeTab!} />
+          ) : isWorkflowsTabPath(activeTab) ? (
             <LazyWorkflowsView />
           ) : isAtlasTabPath(activeTab) ? (
             <LazyAtlasView />
