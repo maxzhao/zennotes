@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { useStore } from '../store'
+import { findLeaf } from './pane-layout'
 
 const NARROW = '(width < 1024px)'
 const WIDE_VISIBILITY = 'zen:knowledge-panel-wide-open'
@@ -56,12 +57,21 @@ export function useKnowledgePanelLayout(): boolean {
           /* storage disabled */
         }
       }
-      // Also catches menu, keyboard and asynchronous opens (including Agent/live updates that switch a tab).
+      // Folder selection temporarily clears selectedPath; its later restoration is
+      // not a tab open. Observe the pane's actual active tab instead.
+      const activeTab = findLeaf(
+        state.paneLayout,
+        state.activePaneId,
+      )?.activeTab
+      const previousTab = findLeaf(
+        previous.paneLayout,
+        previous.activePaneId,
+      )?.activeTab
       if (
         media.matches &&
         state.sidebarOpen &&
-        state.selectedPath !== previous.selectedPath &&
-        state.selectedPath
+        activeTab &&
+        activeTab !== previousTab
       )
         closeKnowledgeDrawer()
     })
@@ -70,18 +80,16 @@ export function useKnowledgePanelLayout(): boolean {
       media.removeEventListener('change', change)
     }
   }, [])
-  useEffect(() => {
-    if (!narrow) return
+  useLayoutEffect(() => {
     const escape = (event: KeyboardEvent) => {
-      if (
-        event.key === 'Escape' &&
-        !event.defaultPrevented &&
-        useStore.getState().sidebarOpen
-      )
+      if (event.key === 'Escape' && useStore.getState().sidebarOpen)
         closeKnowledgeDrawer()
+      // Do not consume the key: editor, menu and palette Escape handlers still run.
     }
-    window.addEventListener('keydown', escape)
-    return () => window.removeEventListener('keydown', escape)
-  }, [narrow])
+    // Register once, even on wide screens, before passive global Vim listeners
+    // that can stopImmediatePropagation. The close helper checks the live viewport.
+    window.addEventListener('keydown', escape, true)
+    return () => window.removeEventListener('keydown', escape, true)
+  }, [])
   return narrow
 }

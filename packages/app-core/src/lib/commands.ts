@@ -1387,15 +1387,6 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       run: () => getState().toggleNoteList()
     },
     {
-      id: 'view.toggle.tags',
-      title: getState().tagsCollapsed
-        ? 'Show Tags in Sidebar'
-        : 'Hide Tags in Sidebar',
-      category: 'View',
-      keywords: 'tag section fold hide collapse',
-      run: () => getState().setTagsCollapsed(!getState().tagsCollapsed),
-    },
-    {
       id: 'view.content-align',
       title: getState().contentAlign === 'center'
         ? 'Align Content Left'

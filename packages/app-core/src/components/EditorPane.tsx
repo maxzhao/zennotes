@@ -4414,15 +4414,6 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       {hasTabs && (
         <div className={tabStripHeaderClass}>
           <div className="flex shrink-0 items-center gap-0.5 self-center">
-            {!sidebarOpen && (
-              <IconBtn
-                title="Show sidebar (⌘1)"
-                onClick={toggleSidebar}
-                tooltipAlign="left"
-              >
-                <PanelLeftIcon width={16} height={16} />
-              </IconBtn>
-            )}
             <IconBtn
               title={labelWithShortcut(
                 'Go back',

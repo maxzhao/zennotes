@@ -3075,7 +3075,7 @@ export function Sidebar({ narrow }: { narrow: boolean }): JSX.Element {
             }}
             onFocusCapture={() => setFocusedPanel("sidebar")}
             onClick={(event) => {
-              if (!narrow) return;
+              if (!narrow || event.defaultPrevented) return;
               const row = (event.target as HTMLElement).closest<HTMLElement>(
                 "[data-sidebar-type]",
               );
@@ -3770,7 +3770,7 @@ export function Sidebar({ narrow }: { narrow: boolean }): JSX.Element {
                 )}
               </div>
             </div>
-            <div className="zn-sidebar-footer-safe shrink-0 border-t border-paper-300 px-3 py-2">
+            <div className="zn-sidebar-footer-safe grid shrink-0 grid-cols-3 gap-1 border-t border-paper-300 px-3 py-2">
               <SidebarIndexGroup
                 counter={idxCounter.current}
                 pass={idxPass}
@@ -3997,6 +3997,8 @@ export function Sidebar({ narrow }: { narrow: boolean }): JSX.Element {
   );
 }
 
+// Allocate row indices when React visits each child, not while its parent maps
+// siblings: an expanded folder must consume its subtree before the next leaf.
 function SidebarIndexGroup({ counter, pass, render }: { counter: SidebarIdxCounter; pass: SidebarIdxPass; render: () => JSX.Element }): JSX.Element {
   useStableSidebarIdxBase(counter, pass);
   return render();
@@ -4600,7 +4602,9 @@ function FolderTreeContents({
   const selectedEntryIndex = useMemo(
     () =>
       selectedPath
-        ? entries.findIndex((entry) => treeRenderEntryPath(entry) === selectedPath)
+        ? entries.findIndex(
+            (entry) => treeRenderEntryPath(entry) === selectedPath,
+          )
         : -1,
     [entries, selectedPath],
   );
@@ -4680,39 +4684,57 @@ function FolderTreeContents({
         }
 
         if (entry.type === "asset") {
-          const assetIdx = idxCounter.value++;
           return (
-            <AssetLeaf
+            <SidebarIndexGroup
               key={entry.asset.path}
-              asset={entry.asset}
-              vaultRoot={vaultRoot}
-              depth={depth}
-              showSidebarChevrons={showSidebarChevrons}
-              onOpen={() => onOpenAsset(entry.asset.path)}
-              onContextMenu={(e) => onAssetContextMenu(e, entry.asset)}
-              sidebarFocused={sidebarFocused}
-              sidebarIdx={assetIdx}
-              vimHighlight={vimCursor === assetIdx}
+              counter={idxCounter}
+              pass={childIdxPass}
+              render={() => {
+                const assetIdx = idxCounter.value++;
+                return (
+                  <AssetLeaf
+                    key={entry.asset.path}
+                    asset={entry.asset}
+                    vaultRoot={vaultRoot}
+                    depth={depth}
+                    showSidebarChevrons={showSidebarChevrons}
+                    onOpen={() => onOpenAsset(entry.asset.path)}
+                    onContextMenu={(e) => onAssetContextMenu(e, entry.asset)}
+                    sidebarFocused={sidebarFocused}
+                    sidebarIdx={assetIdx}
+                    vimHighlight={vimCursor === assetIdx}
+                  />
+                );
+              }}
             />
           );
         }
         const n = entry.note;
-        const noteIdx = idxCounter.value++;
         return (
-          <NoteLeaf
+          <SidebarIndexGroup
             key={n.path}
-            note={n}
-            depth={depth}
-            showSidebarChevrons={showSidebarChevrons}
-            active={n.path === selectedPath}
-            selected={selectedKeys.has(noteSelectionKey(n.path))}
-            sidebarFocused={sidebarFocused}
-            onSelectItem={onSelectItem}
-            onSelectNote={onSelectNote}
-            onContextMenuNote={onNoteContextMenu}
-            dragPayloadForItem={dragPayloadForItem}
-            sidebarIdx={noteIdx}
-            vimHighlight={vimCursor === noteIdx}
+            counter={idxCounter}
+            pass={childIdxPass}
+            render={() => {
+              const noteIdx = idxCounter.value++;
+              return (
+                <NoteLeaf
+                  key={n.path}
+                  note={n}
+                  depth={depth}
+                  showSidebarChevrons={showSidebarChevrons}
+                  active={n.path === selectedPath}
+                  selected={selectedKeys.has(noteSelectionKey(n.path))}
+                  sidebarFocused={sidebarFocused}
+                  onSelectItem={onSelectItem}
+                  onSelectNote={onSelectNote}
+                  onContextMenuNote={onNoteContextMenu}
+                  dragPayloadForItem={dragPayloadForItem}
+                  sidebarIdx={noteIdx}
+                  vimHighlight={vimCursor === noteIdx}
+                />
+              );
+            }}
           />
         );
       })}
@@ -4908,8 +4930,11 @@ function SubTree({
     vaultSettings.folderIcons,
   );
   const folderColorClass =
-    resolveFolderColorGlyphClass(folder, node.subpath, vaultSettings.folderColors) ??
-    undefined;
+    resolveFolderColorGlyphClass(
+      folder,
+      node.subpath,
+      vaultSettings.folderColors,
+    ) ?? undefined;
   // A `<Name>.base` folder is a database: render it with a database icon and a
   // title without the suffix; clicking the row opens the grid, while the
   // chevron still expands to reveal its record-page notes. (#185)
@@ -4927,7 +4952,9 @@ function SubTree({
   const selectedEntryIndex = useMemo(
     () =>
       selectedPath
-        ? entries.findIndex((entry) => treeRenderEntryPath(entry) === selectedPath)
+        ? entries.findIndex(
+            (entry) => treeRenderEntryPath(entry) === selectedPath,
+          )
         : -1,
     [entries, selectedPath],
   );
@@ -4952,9 +4979,7 @@ function SubTree({
       )
     : undefined;
 
-  const handleSelect = (
-    e: React.MouseEvent | React.KeyboardEvent,
-  ): void => {
+  const handleSelect = (e: React.MouseEvent | React.KeyboardEvent): void => {
     if (databaseCsvPath) {
       onSelectItem(e, { kind: "folder", folder, subpath: node.subpath }, () => {
         void useStore.getState().openDatabase(databaseCsvPath);
@@ -5002,7 +5027,11 @@ function SubTree({
         onDragStart={(e) =>
           setSidebarDragPayload(
             e,
-            dragPayloadForItem({ kind: "folder", folder, subpath: node.subpath }),
+            dragPayloadForItem({
+              kind: "folder",
+              folder,
+              subpath: node.subpath,
+            }),
           )
         }
         dropTarget={dragHover}
@@ -5024,7 +5053,13 @@ function SubTree({
         sidebarIdx={myIdx}
         vimHighlight={vimCursor === myIdx}
         sidebarFocused={sidebarFocused}
-        sidebarData={{ type: "folder", folder, subpath: node.subpath, key, database: databaseCsvPath }}
+        sidebarData={{
+          type: "folder",
+          folder,
+          subpath: node.subpath,
+          key,
+          database: databaseCsvPath,
+        }}
         selectionKey={selectionKey}
         reserveLeadingSlot={showSidebarChevrons}
         showExpandChevron={showSidebarChevrons}
@@ -5056,87 +5091,107 @@ function SubTree({
           })()
         ) : (
           <>
-          {visibleEntries.map((entry) => {
-            if (entry.type === "folder") {
+            {visibleEntries.map((entry) => {
+              if (entry.type === "folder") {
+                return (
+                  <SubTree
+                    key={entry.node.subpath}
+                    node={entry.node}
+                    depth={depth + 1}
+                    folder={folder}
+                    vaultSettings={vaultSettings}
+                    isFolderActive={isFolderActive}
+                    collapsed={collapsed}
+                    toggleCollapse={toggleCollapse}
+                    setView={setView}
+                    onContextMenu={onContextMenu}
+                    showNotes={showNotes}
+                    selectedPath={selectedPath}
+                    vaultRoot={vaultRoot}
+                    onSelectNote={onSelectNote}
+                    onOpenAsset={onOpenAsset}
+                    onNoteContextMenu={onNoteContextMenu}
+                    onAssetContextMenu={onAssetContextMenu}
+                    sortComparator={sortComparator}
+                    onDropOnFolder={onDropOnFolder}
+                    selectedKeys={selectedKeys}
+                    onSelectItem={onSelectItem}
+                    dragPayloadForItem={dragPayloadForItem}
+                    idxCounter={idxCounter}
+                    idxPass={childIdxPass}
+                    vimCursor={vimCursor}
+                    sidebarFocused={sidebarFocused}
+                    groupByKind={groupByKind}
+                    showSidebarChevrons={showSidebarChevrons}
+                  />
+                );
+              }
+
+              if (entry.type === "asset") {
+                return (
+                  <SidebarIndexGroup
+                    key={entry.asset.path}
+                    counter={idxCounter}
+                    pass={childIdxPass}
+                    render={() => {
+                      const assetIdx = idxCounter.value++;
+                      return (
+                        <AssetLeaf
+                          key={entry.asset.path}
+                          asset={entry.asset}
+                          vaultRoot={vaultRoot}
+                          depth={depth + 1}
+                          showSidebarChevrons={showSidebarChevrons}
+                          onOpen={() => onOpenAsset(entry.asset.path)}
+                          onContextMenu={(e) =>
+                            onAssetContextMenu(e, entry.asset)
+                          }
+                          sidebarFocused={sidebarFocused}
+                          sidebarIdx={assetIdx}
+                          vimHighlight={vimCursor === assetIdx}
+                        />
+                      );
+                    }}
+                  />
+                );
+              }
+
+              const n = entry.note;
               return (
-                <SubTree
-                  key={entry.node.subpath}
-                  node={entry.node}
-                  depth={depth + 1}
-                  folder={folder}
-                  vaultSettings={vaultSettings}
-                  isFolderActive={isFolderActive}
-                  collapsed={collapsed}
-                  toggleCollapse={toggleCollapse}
-                  setView={setView}
-                  onContextMenu={onContextMenu}
-                  showNotes={showNotes}
-                  selectedPath={selectedPath}
-                  vaultRoot={vaultRoot}
-                  onSelectNote={onSelectNote}
-                  onOpenAsset={onOpenAsset}
-                  onNoteContextMenu={onNoteContextMenu}
-                  onAssetContextMenu={onAssetContextMenu}
-                  sortComparator={sortComparator}
-                  onDropOnFolder={onDropOnFolder}
-                  selectedKeys={selectedKeys}
-                  onSelectItem={onSelectItem}
-                  dragPayloadForItem={dragPayloadForItem}
-                  idxCounter={idxCounter}
-                  idxPass={childIdxPass}
-                  vimCursor={vimCursor}
-                  sidebarFocused={sidebarFocused}
-                  groupByKind={groupByKind}
-                  showSidebarChevrons={showSidebarChevrons}
+                <SidebarIndexGroup
+                  key={n.path}
+                  counter={idxCounter}
+                  pass={childIdxPass}
+                  render={() => {
+                    const noteIdx = idxCounter.value++;
+                    return (
+                      <NoteLeaf
+                        key={n.path}
+                        note={n}
+                        depth={depth + 1}
+                        showSidebarChevrons={showSidebarChevrons}
+                        active={n.path === selectedPath}
+                        selected={selectedKeys.has(noteSelectionKey(n.path))}
+                        sidebarFocused={sidebarFocused}
+                        onSelectItem={onSelectItem}
+                        onSelectNote={onSelectNote}
+                        onContextMenuNote={onNoteContextMenu}
+                        dragPayloadForItem={dragPayloadForItem}
+                        sidebarIdx={noteIdx}
+                        vimHighlight={vimCursor === noteIdx}
+                      />
+                    );
+                  }}
                 />
               );
-            }
-
-            if (entry.type === "asset") {
-              const assetIdx = idxCounter.value++;
-              return (
-                <AssetLeaf
-                  key={entry.asset.path}
-                  asset={entry.asset}
-                  vaultRoot={vaultRoot}
-                  depth={depth + 1}
-                  showSidebarChevrons={showSidebarChevrons}
-                  onOpen={() => onOpenAsset(entry.asset.path)}
-                  onContextMenu={(e) => onAssetContextMenu(e, entry.asset)}
-                  sidebarFocused={sidebarFocused}
-                  sidebarIdx={assetIdx}
-                  vimHighlight={vimCursor === assetIdx}
-                />
-              );
-            }
-
-            const n = entry.note;
-            const noteIdx = idxCounter.value++;
-            return (
-              <NoteLeaf
-                key={n.path}
-                note={n}
-                depth={depth + 1}
-                showSidebarChevrons={showSidebarChevrons}
-                active={n.path === selectedPath}
-                selected={selectedKeys.has(noteSelectionKey(n.path))}
-                sidebarFocused={sidebarFocused}
-                onSelectItem={onSelectItem}
-                onSelectNote={onSelectNote}
-                onContextMenuNote={onNoteContextMenu}
-                dragPayloadForItem={dragPayloadForItem}
-                sidebarIdx={noteIdx}
-                vimHighlight={vimCursor === noteIdx}
+            })}
+            {progressive && effectiveEntryLimit < entries.length && (
+              <div
+                ref={progressiveSentinelRef}
+                className="h-px shrink-0"
+                aria-hidden="true"
               />
-            );
-          })}
-          {progressive && effectiveEntryLimit < entries.length && (
-            <div
-              ref={progressiveSentinelRef}
-              className="h-px shrink-0"
-              aria-hidden="true"
-            />
-          )}
+            )}
           </>
         ))}
     </div>
@@ -5870,9 +5925,8 @@ function FavoriteRow({
   );
 }
 
-// A System row (Archive / Trash / Assets): a full-width vertical row with a
-// leading glyph, label, and trailing count. Vim-navigable and activatable via
-// its data-sidebar-type.
+// Equal-width footer action (Archive / Trash / Assets), with counts in the
+// tooltip only. Retains the existing menus and data-sidebar-type for Vim.
 function SystemRow({
   label,
   icon,
@@ -5899,21 +5953,14 @@ function SystemRow({
   const strongActive = active && (!sidebarFocused || !!vimHighlight);
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
+    <button
+      type="button"
       title={`${label} · ${count}`}
       aria-label={label}
       onClick={onClick}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onClick();
-        }
-      }}
       onContextMenu={onContextMenu}
       className={[
-        "group select-none flex h-[var(--z-sidebar-row-h)] items-center gap-1.5 rounded-lg px-1 text-left text-sm outline-none transition-colors focus:outline-none",
+        "group select-none flex h-8 min-w-0 w-full items-center gap-1 rounded-lg px-1 text-left text-xs outline-none transition-colors focus:outline-none",
         active
           ? vimHighlight
             ? "vim-cursor-on-active bg-paper-300/70 text-ink-900 font-medium"
@@ -5936,7 +5983,7 @@ function SystemRow({
       {sidebarFocused && vimHighlight && (
         <RowKeyHint active={active} keyLabel="m" compact={count > 0} />
       )}
-    </div>
+    </button>
   );
 }
 

@@ -30,41 +30,51 @@ export const ROW_PANEL_DEFS: Record<
 > = {
   sidebar: { selector: '[data-sidebar-idx]', datasetKey: 'sidebarIdx' },
   notelist: { selector: '[data-notelist-idx]', datasetKey: 'notelistIdx' },
-  connections: { selector: '[data-connections-idx]', datasetKey: 'connectionsIdx' },
-  outline: { selector: '[data-outline-idx]', datasetKey: 'outlineIdx' }
+  connections: {
+    selector: '[data-connections-idx]',
+    datasetKey: 'connectionsIdx',
+  },
+  outline: { selector: '[data-outline-idx]', datasetKey: 'outlineIdx' },
 }
 
-export function isRowPanel(panel: string | null | undefined): panel is RowPanel {
+export function isRowPanel(
+  panel: string | null | undefined,
+): panel is RowPanel {
   return !!panel && panel in ROW_PANEL_DEFS
 }
 
-/** Rows currently on screen, in the order they are rendered (top to bottom,
- *  then left to right), falling back to the assigned index within a row. */
+/** Mounted rows in traversal order. Sidebar DOM order is header → scrollable
+ *  content → fixed footer, independent of clipping/scroll position. Other
+ *  panels retain geometric order (top to bottom, then left to right). */
 export function getIndexedElements(
   selector: string,
-  datasetKey: IndexedDatasetKey
+  datasetKey: IndexedDatasetKey,
 ): HTMLElement[] {
-  return [...document.querySelectorAll<HTMLElement>(selector)]
-    .filter((el) => el.getClientRects().length > 0)
-    .sort((a, b) => {
-      const aRect = a.getBoundingClientRect()
-      const bRect = b.getBoundingClientRect()
-      const rowDelta = aRect.top - bRect.top
+  const items = [...document.querySelectorAll<HTMLElement>(selector)].filter(
+    (el) => el.getClientRects().length > 0,
+  )
+  // Offscreen tree rows may have rectangles below the pinned footer; sorting
+  // those rectangles would put G on a tree row instead of the final footer item.
+  if (datasetKey === 'sidebarIdx') return items
+  return items.sort((a, b) => {
+    const aRect = a.getBoundingClientRect()
+    const bRect = b.getBoundingClientRect()
+    const rowDelta = aRect.top - bRect.top
 
-      // Follow the actual rendered row order first, then fall back
-      // to the assigned index for stable ordering within the same row.
-      if (Math.abs(rowDelta) > 2) return rowDelta
+    // Follow the actual rendered row order first, then fall back
+    // to the assigned index for stable ordering within the same row.
+    if (Math.abs(rowDelta) > 2) return rowDelta
 
-      const colDelta = aRect.left - bRect.left
-      if (Math.abs(colDelta) > 2) return colDelta
+    const colDelta = aRect.left - bRect.left
+    if (Math.abs(colDelta) > 2) return colDelta
 
-      return getIndexedValue(a, datasetKey) - getIndexedValue(b, datasetKey)
-    })
+    return getIndexedValue(a, datasetKey) - getIndexedValue(b, datasetKey)
+  })
 }
 
 export function getIndexedValue(
   el: HTMLElement | null,
-  datasetKey: IndexedDatasetKey
+  datasetKey: IndexedDatasetKey,
 ): number {
   const value = Number(el?.dataset[datasetKey] ?? -1)
   return Number.isFinite(value) ? value : -1
@@ -73,7 +83,7 @@ export function getIndexedValue(
 export function getIndexedElementByIndex(
   items: HTMLElement[],
   datasetKey: IndexedDatasetKey,
-  index: number
+  index: number,
 ): HTMLElement | undefined {
   return items.find((item) => getIndexedValue(item, datasetKey) === index)
 }
@@ -83,18 +93,22 @@ export function getIndexedElementByIndex(
 export function findPositionByIndex(
   items: HTMLElement[],
   datasetKey: IndexedDatasetKey,
-  cursorIndex: number
+  cursorIndex: number,
 ): number {
-  const exact = items.findIndex((item) => getIndexedValue(item, datasetKey) === cursorIndex)
+  const exact = items.findIndex(
+    (item) => getIndexedValue(item, datasetKey) === cursorIndex,
+  )
   if (exact >= 0) return exact
-  return items.length === 0 ? 0 : Math.max(0, Math.min(cursorIndex, items.length - 1))
+  return items.length === 0
+    ? 0
+    : Math.max(0, Math.min(cursorIndex, items.length - 1))
 }
 
 /** Update the cursor index and scroll the element into view. */
 export function scrollToIndexedElement(
   el: HTMLElement | undefined,
   datasetKey: IndexedDatasetKey,
-  setIndex: (idx: number) => void
+  setIndex: (idx: number) => void,
 ): void {
   if (!el) return
   const idx = getIndexedValue(el, datasetKey)
@@ -107,7 +121,7 @@ export function scrollToIndexedIndex(
   items: HTMLElement[],
   datasetKey: IndexedDatasetKey,
   index: number,
-  setIndex: (idx: number) => void
+  setIndex: (idx: number) => void,
 ): void {
   const target = getIndexedElementByIndex(items, datasetKey, index)
   setIndex(index)
@@ -117,17 +131,29 @@ export function scrollToIndexedIndex(
 /** The store cursor behind a row panel, read and write. */
 export function rowCursor(
   panel: RowPanel,
-  state: ReturnType<typeof useStore.getState>
+  state: ReturnType<typeof useStore.getState>,
 ): { index: number; setIndex: (idx: number) => void } {
   switch (panel) {
     case 'sidebar':
-      return { index: state.sidebarCursorIndex, setIndex: state.setSidebarCursorIndex }
+      return {
+        index: state.sidebarCursorIndex,
+        setIndex: state.setSidebarCursorIndex,
+      }
     case 'notelist':
-      return { index: state.noteListCursorIndex, setIndex: state.setNoteListCursorIndex }
+      return {
+        index: state.noteListCursorIndex,
+        setIndex: state.setNoteListCursorIndex,
+      }
     case 'connections':
-      return { index: state.connectionsCursorIndex, setIndex: state.setConnectionsCursorIndex }
+      return {
+        index: state.connectionsCursorIndex,
+        setIndex: state.setConnectionsCursorIndex,
+      }
     case 'outline':
-      return { index: state.outlineCursorIndex, setIndex: state.setOutlineCursorIndex }
+      return {
+        index: state.outlineCursorIndex,
+        setIndex: state.setOutlineCursorIndex,
+      }
   }
 }
 
@@ -181,9 +207,14 @@ function getCommentRows(): HTMLElement[] {
   return getIndexedElements(COMMENT_ROW_SELECTOR, 'commentsIdx')
 }
 
-function commentPosition(items: HTMLElement[], activeCommentId: string | null): number {
+function commentPosition(
+  items: HTMLElement[],
+  activeCommentId: string | null,
+): number {
   if (items.length === 0 || !activeCommentId) return 0
-  const exact = items.findIndex((item) => item.dataset.commentId === activeCommentId)
+  const exact = items.findIndex(
+    (item) => item.dataset.commentId === activeCommentId,
+  )
   return exact >= 0 ? exact : 0
 }
 
