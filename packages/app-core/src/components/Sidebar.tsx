@@ -3051,7 +3051,7 @@ export function Sidebar({ narrow }: { narrow: boolean }): JSX.Element {
           <button
             type="button"
             aria-label="关闭知识库"
-            className="absolute inset-y-0 left-[72px] right-0 z-20 bg-black/30"
+            className="absolute inset-y-0 left-[72px] right-0 z-20 bg-black/[0.45]"
             onClick={closeKnowledgeDrawer}
           />
         )}
@@ -3061,7 +3061,7 @@ export function Sidebar({ narrow }: { narrow: boolean }): JSX.Element {
             // question only Vim mode asks; a click into the sidebar with Vim off
             // used to draw it too, and read as a terminal to people who never use
             // the keys it stands for.
-            className={`zn-knowledge-panel glass-sidebar ${narrow ? "absolute inset-y-0 left-[72px] z-30" : "relative"} flex min-h-0 shrink-0 flex-col pt-3${isSidebarFocused && vimMode ? " panel-focused" : ""}`}
+            className={`zn-knowledge-panel glass-sidebar ${narrow ? "absolute inset-y-0 left-[72px] z-30 shadow-float" : "relative"} flex min-h-0 shrink-0 flex-col pt-3${isSidebarFocused && vimMode ? " panel-focused" : ""}`}
             style={{
               width: narrow ? "min(320px, calc(100vw - 72px))" : sidebarWidth,
             }}
@@ -5960,7 +5960,7 @@ function SystemRow({
       onClick={onClick}
       onContextMenu={onContextMenu}
       className={[
-        "group select-none flex h-8 min-w-0 w-full items-center gap-1 rounded-lg px-1 text-left text-xs outline-none transition-colors focus:outline-none",
+        "group select-none flex h-8 min-w-0 w-full items-center justify-center gap-1 rounded-lg px-1 text-center text-xs outline-none transition-colors focus:outline-none",
         active
           ? vimHighlight
             ? "vim-cursor-on-active bg-paper-300/70 text-ink-900 font-medium"
@@ -5979,7 +5979,7 @@ function SystemRow({
       <SidebarGlyph active={strongActive} rowActive={active}>
         {icon}
       </SidebarGlyph>
-      <span className="flex-1 truncate">{label}</span>
+      <span className="min-w-0 truncate">{label}</span>
       {sidebarFocused && vimHighlight && (
         <RowKeyHint active={active} keyLabel="m" compact={count > 0} />
       )}
