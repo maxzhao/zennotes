@@ -3051,7 +3051,7 @@ export function Sidebar({ narrow }: { narrow: boolean }): JSX.Element {
           <button
             type="button"
             aria-label="关闭知识库"
-            className="absolute inset-y-0 left-[72px] right-0 z-20 bg-black/[0.45]"
+            className="absolute inset-y-0 left-[72px] right-0 z-20 bg-black/[0.55]"
             onClick={closeKnowledgeDrawer}
           />
         )}
@@ -3061,9 +3061,14 @@ export function Sidebar({ narrow }: { narrow: boolean }): JSX.Element {
             // question only Vim mode asks; a click into the sidebar with Vim off
             // used to draw it too, and read as a terminal to people who never use
             // the keys it stands for.
-            className={`zn-knowledge-panel glass-sidebar ${narrow ? "absolute inset-y-0 left-[72px] z-30 shadow-float" : "relative"} flex min-h-0 shrink-0 flex-col pt-3${isSidebarFocused && vimMode ? " panel-focused" : ""}`}
+            className={`zn-knowledge-panel glass-sidebar ${narrow ? "absolute inset-y-0 left-[72px] z-30" : "relative"} flex min-h-0 shrink-0 flex-col pt-3${isSidebarFocused && vimMode ? " panel-focused" : ""}`}
             style={{
               width: narrow ? "min(320px, calc(100vw - 72px))" : sidebarWidth,
+              // Inline so the drawer elevation is not overridden by the
+              // .glass-sidebar theme rules.
+              boxShadow: narrow
+                ? "14px 0 36px rgba(0,0,0,0.6), 1px 0 0 rgba(255,255,255,0.08)"
+                : undefined,
             }}
             // Programmatic focus target for focusSidebarPanel (the Focus Sidebar
             // command); -1 keeps it out of the tab order.
