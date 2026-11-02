@@ -314,11 +314,6 @@ export function SidebarExtensions(): JSX.Element | null {
     }
   }, [vault?.root])
   React.useEffect(() => {
-    if (!extensions.length) return
-    document.documentElement.setAttribute('data-extensions', '')
-    return () => document.documentElement.removeAttribute('data-extensions')
-  }, [extensions.length])
-  React.useEffect(() => {
     if (
       window.zen.getAppInfo().runtime !== 'web' ||
       !loaded ||
