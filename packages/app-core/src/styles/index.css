@@ -6348,8 +6348,8 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
   pointer-events: none;
 }
 
-/* Only extension-capable Web clients expose the additive schema-1 tokens. */
-:root[data-extensions] {
+/* Schema-1 extension tokens follow the theme independently of workspace layout. */
+:root {
   --ext-bg: rgb(var(--z-bg));
   --ext-surface: rgb(var(--z-bg-1));
   --ext-fg: rgb(var(--z-fg));
