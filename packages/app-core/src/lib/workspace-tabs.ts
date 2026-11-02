@@ -1,3 +1,4 @@
+import { isExtensionTabPath } from './extension-path'
 import { isArchiveTabPath } from '@shared/archive'
 import { isHelpTabPath } from '@shared/help'
 import { isQuickNotesTabPath } from '@shared/quick-notes'
@@ -15,6 +16,7 @@ import { allLeaves, type PaneLayout } from './pane-layout'
 
 export function isWorkspaceVirtualTabPath(path: string): boolean {
   return (
+    isExtensionTabPath(path) ||
     isQuickNotesTabPath(path) ||
     isTasksTabPath(path) ||
     isWorkflowsTabPath(path) ||

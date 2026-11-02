@@ -1,6 +1,7 @@
 import { createCanvas } from '../lib/canvas-actions'
 import type { PeerProject } from '@zennotes/bridge-contract/maxa'
 import { SidebarRecent } from './MaxaPanels'
+import { SidebarExtensions } from './ExtensionHost'
 import { runNoteLifecycleAction, runNoteBatchAction, runEmptyTrash } from "../lib/note-lifecycle-actions";
 import {
   createContext,
@@ -3152,6 +3153,7 @@ export function Sidebar(): JSX.Element {
       </div>
 
       <SidebarRecent />
+      <SidebarExtensions />
 
       {/* Search + toolbar on one row. flex-wrap: on a narrow sidebar the
        *  icon strip drops to its own line under the search field instead of
