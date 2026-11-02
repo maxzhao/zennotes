@@ -10,9 +10,9 @@ export type SystemFolderLabels = Partial<Record<LabelKey, string>>
 export const DEFAULT_SYSTEM_FOLDER_LABELS: Record<LabelKey, string> = {
   inbox: 'Inbox',
   quick: 'Quick Notes',
-  archive: 'Archive',
-  trash: 'Trash',
-  tasks: 'Tasks'
+  archive: '归档',
+  trash: '回收站',
+  tasks: '待办'
 }
 
 const LABEL_KEYS: LabelKey[] = ['inbox', 'quick', 'archive', 'trash', 'tasks']

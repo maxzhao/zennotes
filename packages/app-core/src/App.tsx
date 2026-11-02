@@ -1,3 +1,5 @@
+import { useKnowledgePanelLayout } from './lib/knowledge-panel'
+import { ExtensionRuntime } from './components/ExtensionHost'
 import { useMaxaPanels } from './lib/maxa-panels'
 import { requestSettingsTarget } from './lib/settings-navigation'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
@@ -394,6 +396,7 @@ function App(): JSX.Element {
   const setTemplatePaletteOpen = useStore((s) => s.setTemplatePaletteOpen)
   const embedDrawingPaletteOpen = useStore((s) => s.embedDrawingPaletteOpen)
   const setEmbedDrawingPaletteOpen = useStore((s) => s.setEmbedDrawingPaletteOpen)
+  const narrowNavigation = useKnowledgePanelLayout()
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const noteListOpen = useStore((s) => s.noteListOpen)
   const focusedPanel = useStore((s) => s.focusedPanel)
@@ -1334,8 +1337,8 @@ function App(): JSX.Element {
       data-focused-panel={focusedPanel ?? 'none'}
     >
       {!zenMode && <TitleBar />}
-      <div className="flex min-h-0 flex-1">
-        {!zenMode && sidebarOpen && <Sidebar />}
+      <div className="relative flex min-h-0 flex-1">
+        {!zenMode && <Sidebar narrow={narrowNavigation} />}
         {!zenMode && noteListOpen && !unifiedSidebar && <NoteList />}
         <Suspense fallback={<EditorLoadingFallback />}>
           <Editor />
@@ -1396,6 +1399,7 @@ function App(): JSX.Element {
           <LinkPopover />
         </Suspense>
       )}
+      <ExtensionRuntime />
       <PromptHost />
       <ConfirmHost />
       <DatePickerHost />

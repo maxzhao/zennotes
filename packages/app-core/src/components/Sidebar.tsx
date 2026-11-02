@@ -1,7 +1,8 @@
 import { createCanvas } from '../lib/canvas-actions'
 import type { PeerProject } from '@zennotes/bridge-contract/maxa'
 import { SidebarRecent } from './MaxaPanels'
-import { SidebarExtensions } from './ExtensionHost'
+import { ActivityBar } from './ActivityBar'
+import { closeKnowledgeDrawer } from '../lib/knowledge-panel'
 import { runNoteLifecycleAction, runNoteBatchAction, runEmptyTrash } from "../lib/note-lifecycle-actions";
 import {
   createContext,
@@ -18,7 +19,6 @@ import { getVirtualRange } from "../lib/virtual-list";
 import {
   isArchiveViewActive,
   isAssetsViewActive,
-  isHelpViewActive,
   isQuickNotesViewActive,
   isTagsViewActive,
   isTasksViewActive,
@@ -49,18 +49,11 @@ import {
   DatabaseIcon,
   DocumentIcon,
   ExcalidrawIcon,
-  ExpandAllIcon,
   LinkIcon,
   PaperclipIcon,
-  FolderPlusIcon,
-  NotePlusIcon,
-  PanelLeftIcon,
   PencilIcon,
   PlusIcon,
   SearchIcon,
-  SettingsIcon,
-  SortIcon,
-  TargetIcon,
   TrashIcon,
   WorkflowIcon,
   AtlasIcon,
@@ -146,7 +139,6 @@ import {
   type SidebarCursorAnchor,
 } from "../lib/sidebar-cursor";
 import { buildVaultSwitcherEntries } from "../lib/vault-switcher";
-import { appUpdateBadgeLabel, useAppUpdateState } from "../lib/app-update-state";
 import { getISOWeekYear } from "../lib/template-render";
 import { requestPublishNote } from "../lib/publish-note-requests";
 import {
@@ -158,7 +150,6 @@ import {
   subscribePublishedNoteChanges,
 } from "../lib/published-note-events";
 import { useToastStore } from "../lib/toast";
-import { chromeCarriesWindowDrag } from "../lib/window-chrome";
 
 const ACTIVE_TAG_PARSE_DELAY_MS = 220;
 const ACTIVE_TAG_PARSE_LARGE_BODY_CHARS = 120_000;
@@ -234,16 +225,6 @@ function defaultNewNoteTarget(
   };
 }
 
-function remoteWorkspaceLabel(baseUrl: string | null): string {
-  if (!baseUrl) return "Remote vault";
-  try {
-    const url = new URL(baseUrl);
-    return url.host || "Remote vault";
-  } catch {
-    return baseUrl;
-  }
-}
-
 function SidebarGlyph({
   active,
   rowActive,
@@ -266,7 +247,7 @@ function SidebarGlyph({
             ? "text-ink-900"
             : rowActive
               ? "text-accent"
-              : "text-ink-400 group-hover:text-ink-700",
+              : "text-ink-400 [@media(hover:hover)]:group-hover:text-ink-700",
       ].join(" ")}
     >
       {children}
@@ -458,7 +439,17 @@ function RootFolderDropTarget({
   );
 }
 
-export function Sidebar(): JSX.Element {
+export function Sidebar({ narrow }: { narrow: boolean }): JSX.Element {
+  const panelOpen = useStore((s) => s.sidebarOpen);
+  const [panelTab, setPanelTab] = useState<'files' | 'recent' | 'tags'>(() => {
+    try { const value = localStorage.getItem('zen:knowledge-panel-tab'); return value === 'recent' || value === 'tags' ? value : 'files'; } catch { return 'files'; }
+  });
+  const selectPanelTab = (tab: 'files' | 'recent' | 'tags') => {
+    setPanelTab(tab);
+    useStore.getState().setSidebarCursorIndex(0);
+    sidebarCursorAnchorRef.current = null;
+    try { localStorage.setItem('zen:knowledge-panel-tab', tab); } catch { /* storage disabled */ }
+  };
   const vault = useStore((s) => s.vault);
   const notes = useStore((s) => s.notes);
   const allFolders = useStore((s) => s.folders);
@@ -488,8 +479,6 @@ export function Sidebar(): JSX.Element {
   const atlasEnabled = useStore((s) => s.atlasEnabled);
   const openQuickNotesView = useStore((s) => s.openQuickNotesView);
   const quickNotesViewActive = useStore(isQuickNotesViewActive);
-  const openHelpView = useStore((s) => s.openHelpView);
-  const helpViewActive = useStore(isHelpViewActive);
   const openArchiveView = useStore((s) => s.openArchiveView);
   const archiveViewActive = useStore(isArchiveViewActive);
   const openTrashView = useStore((s) => s.openTrashView);
@@ -515,13 +504,9 @@ export function Sidebar(): JSX.Element {
   const openTemplatePaletteForFolder = useStore((s) => s.openTemplatePaletteForFolder);
   const quickNoteDateTitle = useStore((s) => s.quickNoteDateTitle);
   const quickNoteTitlePrefix = useStore((s) => s.quickNoteTitlePrefix);
-  const toggleSidebar = useStore((s) => s.toggleSidebar);
   const setFocusedPanel = useStore((s) => s.setFocusedPanel);
-  const setSettingsOpen = useStore((s) => s.setSettingsOpen);
   const renameTag = useStore((s) => s.renameTag);
   const deleteTag = useStore((s) => s.deleteTag);
-  const tagsCollapsed = useStore((s) => s.tagsCollapsed);
-  const setTagsCollapsed = useStore((s) => s.setTagsCollapsed);
   const nestedTags = useStore((s) => s.nestedTags);
   const collapsedTagNodes = useStore((s) => s.collapsedTagNodes);
   const toggleCollapseTagNode = useStore((s) => s.toggleCollapseTagNode);
@@ -537,13 +522,7 @@ export function Sidebar(): JSX.Element {
   const moveAsset = useStore((s) => s.moveAsset);
   const deleteAssetAction = useStore((s) => s.deleteAsset);
   const sidebarWidth = useStore((s) => s.sidebarWidth);
-  const showWindowTitleBar = useStore((s) => s.showWindowTitleBar);
   const setSidebarWidth = useStore((s) => s.setSidebarWidth);
-  // Footer degrade ladder (#539). The width is the pref, which is exactly the
-  // rendered width (the aside is fixed-width and shrink-0), so this stays a
-  // plain prop check instead of a resize observer.
-  const footerShowsCount = sidebarWidth >= 310;
-  const footerShowsLabels = sidebarWidth >= 265;
   const noteSortOrder = useStore((s) => s.noteSortOrder);
   const manualNoteOrder = useStore((s) => s.manualNoteOrder);
   const setNoteSortOrder = useStore((s) => s.setNoteSortOrder);
@@ -622,10 +601,6 @@ export function Sidebar(): JSX.Element {
       void opened.then(() => focusEditorNormalMode());
     },
     [previewNote, selectNote, tabsEnabled],
-  );
-  const remoteLabel = useMemo(
-    () => remoteWorkspaceLabel(remoteWorkspaceInfo?.baseUrl ?? null),
-    [remoteWorkspaceInfo?.baseUrl],
   );
   const vaultSwitcherEntries = useMemo(
     () =>
@@ -2169,6 +2144,14 @@ export function Sidebar(): JSX.Element {
         },
       },
       {
+        label: "New note (choose folder)",
+        onSelect: () => {
+          const state = useStore.getState();
+          const target = defaultNewNoteTarget(state.activeNote, state.vaultSettings);
+          void createNoteInChosenFolder({ initialPath: target.folder === "inbox" ? target.subpath : "" });
+        },
+      },
+      {
         label: "New drawing",
         onSelect: async () => {
           await newDrawing();
@@ -2205,7 +2188,7 @@ export function Sidebar(): JSX.Element {
         },
       },
     ],
-    [createAndOpen, createDrawingAndOpen, createDatabase, openTemplatePaletteForFolder, createFolderAction],
+    [createAndOpen, createDrawingAndOpen, createDatabase, openTemplatePaletteForFolder, createFolderAction, createNoteInChosenFolder],
   );
 
   const noteMenuItems = useMemo<ContextMenuItem[]>(() => {
@@ -2831,8 +2814,7 @@ export function Sidebar(): JSX.Element {
   // rendered me" from "I re-rendered alone" (see useStableSidebarIdxBase).
   const idxPass: SidebarIdxPass = {};
   const vimCursor = isSidebarFocused ? sidebarCursorIndex : -1;
-  const vaultHeaderIdx = canOpenVaultMenu ? idxCounter.current.value++ : -1;
-  const vaultHeaderVimHighlight = vimCursor === vaultHeaderIdx;
+
   // VimNav clamps cursor position via Math.min/Math.max on each
   // keystroke using the actual DOM element count — no extra clamping needed.
 
@@ -3059,969 +3041,965 @@ export function Sidebar(): JSX.Element {
 
   return (
     <SidebarScrollerContext.Provider value={sidebarScrollRef}>
-    <aside
-      // The pane ring answers "which pane do Ctrl+W h/j/k/l move from", a
-      // question only Vim mode asks; a click into the sidebar with Vim off
-      // used to draw it too, and read as a terminal to people who never use
-      // the keys it stands for.
-      className={`glass-sidebar relative flex shrink-0 flex-col pt-3${isSidebarFocused && vimMode ? " panel-focused" : ""}`}
-      style={{ width: sidebarWidth }}
-      // Programmatic focus target for focusSidebarPanel (the Focus Sidebar
-      // command); -1 keeps it out of the tab order.
-      data-zen-sidebar
-      tabIndex={-1}
-      onMouseDownCapture={(e) => {
-        syncSidebarCursorFromTarget(e.target);
-        setFocusedPanel("sidebar");
-      }}
-      onFocusCapture={() => setFocusedPanel("sidebar")}
-    >
-      {/* Vault header + top-right actions */}
-      <div
-        // -mt-3 pt-3 pulls the drag into the aside's top padding, the strip a
-        // hidden title bar left behind.
-        className={`flex items-center justify-between px-3 pb-3${
-          chromeCarriesWindowDrag(showWindowTitleBar, window.zen.getAppInfo().runtime)
-            ? " drag-region -mt-3 pt-3"
-            : ""
-        }`}
-      >
-        {canOpenVaultMenu ? (
+      <>
+        <ActivityBar
+          projectName={headerVaultName}
+          canOpenProjectMenu={canOpenVaultMenu}
+          openProjectMenu={openVaultSwitcher}
+        />
+        {narrow && panelOpen && (
           <button
             type="button"
-            onClick={openVaultSwitcher}
-            onContextMenu={openVaultSwitcher}
-            className={[
-              "group flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 py-1 text-left transition-colors hover:bg-paper-200/70",
-              vaultHeaderVimHighlight ? "vim-cursor" : "",
-            ].join(" ")}
-            title={canSwitchVaults ? "Switch vault" : "Open another project"}
-            aria-label={canSwitchVaults ? "Switch vault" : "Open another project"}
-            data-sidebar-idx={vaultHeaderIdx}
-            data-sidebar-type="vault"
-          >
-            <VaultBadge name={headerVaultName} size={28} />
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium text-ink-800">
-                {headerVaultName}
-              </div>
-              {workspaceMode === "remote" && (
-                <div className="mt-0.5 flex items-center gap-1.5 text-xs text-ink-500">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-paper-300/70 bg-paper-100/80 px-1.5 py-0.5 font-medium text-ink-700">
-                    <ArrowUpRightIcon className="h-3 w-3" />
-                    Remote
-                  </span>
-                  <span className="truncate">{remoteLabel}</span>
-                </div>
-              )}
-            </div>
-            <ChevronRightIcon className="h-3.5 w-3.5 rotate-90 text-ink-400 transition-colors group-hover:text-ink-700" />
-          </button>
-        ) : (
-          <div className="flex min-w-0 items-center gap-2">
-            <VaultBadge name={headerVaultName} size={28} />
-            <div className="min-w-0">
-              <div className="truncate text-sm font-medium text-ink-800">
-                {headerVaultName}
-              </div>
-              {workspaceMode === "remote" && (
-                <div className="mt-0.5 flex items-center gap-1.5 text-xs text-ink-500">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-paper-300/70 bg-paper-100/80 px-1.5 py-0.5 font-medium text-ink-700">
-                    <ArrowUpRightIcon className="h-3 w-3" />
-                    Remote
-                  </span>
-                  <span className="truncate">{remoteLabel}</span>
-                </div>
-              )}
-            </div>
-          </div>
+            aria-label="关闭知识库"
+            className="absolute inset-y-0 left-[72px] right-0 z-20 bg-black/30"
+            onClick={closeKnowledgeDrawer}
+          />
         )}
-        <div className="flex items-center gap-0.5">
-          <IconBtn
-            title="Create… (note, drawing, folder, database)"
-            onClick={(e) => {
-              const r = e.currentTarget.getBoundingClientRect();
-              setRootMenu({ x: r.left, y: r.bottom + 4 });
+        {panelOpen && (
+          <aside
+            // The pane ring answers "which pane do Ctrl+W h/j/k/l move from", a
+            // question only Vim mode asks; a click into the sidebar with Vim off
+            // used to draw it too, and read as a terminal to people who never use
+            // the keys it stands for.
+            className={`zn-knowledge-panel glass-sidebar ${narrow ? "absolute inset-y-0 left-[72px] z-30" : "relative"} flex min-h-0 shrink-0 flex-col pt-3${isSidebarFocused && vimMode ? " panel-focused" : ""}`}
+            style={{
+              width: narrow ? "min(320px, calc(100vw - 72px))" : sidebarWidth,
             }}
-          >
-            <PlusIcon />
-          </IconBtn>
-          <IconBtn title="Hide sidebar (⌘1)" onClick={toggleSidebar}>
-            <PanelLeftIcon />
-          </IconBtn>
-        </div>
-      </div>
-
-      <SidebarRecent />
-      <SidebarExtensions />
-
-      {/* Search + toolbar on one row. flex-wrap: on a narrow sidebar the
-       *  icon strip drops to its own line under the search field instead of
-       *  overflowing through the border (#539). */}
-      <div className="flex flex-wrap items-center gap-1 px-3">
-        <button
-          onClick={() => setSearchOpen(true)}
-          className="group flex h-7 flex-1 min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm text-ink-700 transition-colors hover:bg-paper-200/70 hover:text-ink-900"
-          title="Search (⌘P)"
-        >
-          <SearchIcon />
-          <span className="flex-1 truncate">Search</span>
-          <kbd className="rounded bg-paper-200 px-1 py-0.5 text-2xs text-ink-500">
-            ⌘P
-          </kbd>
-        </button>
-        <div className="flex shrink-0 items-center gap-0.5">
-          <IconBtn
-            title="New note (choose folder)"
-            onClick={() => {
-              const state = useStore.getState();
-              const target = defaultNewNoteTarget(
-                state.activeNote,
-                state.vaultSettings,
+            // Programmatic focus target for focusSidebarPanel (the Focus Sidebar
+            // command); -1 keeps it out of the tab order.
+            data-zen-sidebar
+            tabIndex={-1}
+            onMouseDownCapture={(e) => {
+              syncSidebarCursorFromTarget(e.target);
+              setFocusedPanel("sidebar");
+            }}
+            onFocusCapture={() => setFocusedPanel("sidebar")}
+            onClick={(event) => {
+              if (!narrow) return;
+              const row = (event.target as HTMLElement).closest<HTMLElement>(
+                "[data-sidebar-type]",
               );
-              // Prefill the picker with the current context (only the notes
-              // area is pickable, so archive/quick fall back to the root).
-              const initialPath = target.folder === "inbox" ? target.subpath : "";
-              void createNoteInChosenFolder({ initialPath });
+              const type = row?.dataset.sidebarType;
+              if (
+                type &&
+                ([
+                  "note",
+                  "asset",
+                  "tasks",
+                  "workflows",
+                  "atlas",
+                  "archive",
+                  "trash",
+                  "assets",
+                ].includes(type) ||
+                  (type === "folder" && row?.dataset.sidebarDatabase) ||
+                  (type === "tag" &&
+                    (row?.dataset.sidebarTagReal === "1" || !nestedTags)))
+              )
+                closeKnowledgeDrawer();
             }}
           >
-            <NotePlusIcon />
-          </IconBtn>
-          <IconBtn
-            title="New folder"
-            onClick={async () => {
-              const view = useStore.getState().view;
-              // Quick Notes is intentionally flat — fall back to inbox
-              // when the user is currently viewing it.
-              const noFolders =
-                view.kind === "folder" &&
-                (view.folder === "trash" || view.folder === "quick");
-              const parentFolder: NoteFolder =
-                view.kind === "folder" && !noFolders ? view.folder : "inbox";
-              const parentSub =
-                view.kind === "folder" && !noFolders ? view.subpath : "";
-              const name = await promptApp({
-                title: "New folder",
-                placeholder: "Folder name",
-                okLabel: "Create",
-                validate: (v) => {
-                  if (v.includes("/")) return 'Folder name cannot contain "/"';
-                  return null;
-                },
-              });
-              if (!name) return;
-              const clean = name.trim().replace(/^\/+|\/+$/g, "");
-              if (!clean) return;
-              const next = parentSub ? `${parentSub}/${clean}` : clean;
-              try {
-                await createFolderAction(parentFolder, next);
-              } catch (err) {
-                window.alert((err as Error).message);
-              }
-            }}
-          >
-            <FolderPlusIcon />
-          </IconBtn>
-          <IconBtn
-            title={`Sort: ${sortOrderLabel(noteSortOrder)}${groupByKind ? ", Group by kind" : ""}`}
-            onClick={(e) => setSortMenu({ x: e.clientX, y: e.clientY })}
-            active={noteSortOrder !== "none"}
-          >
-            <SortIcon />
-          </IconBtn>
-          <IconBtn
-            title={autoReveal ? "Auto-reveal: on" : "Auto-reveal: off"}
-            onClick={() => setAutoReveal(!autoReveal)}
-            active={autoReveal}
-          >
-            <TargetIcon />
-          </IconBtn>
-          <IconBtn
-            title="Collapse all"
-            onClick={() =>
-              collapsed.size >= allFolderKeys.length
-                ? expandAll()
-                : collapseAll()
-            }
-          >
-            <ExpandAllIcon />
-          </IconBtn>
-        </div>
-      </div>
-
-      {rootContentHiddenByInboxMode && !rootContentBannerDismissed && (
-        <div className="relative mx-3 mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
-          <button
-            type="button"
-            onClick={() => dismissRootContentBanner()}
-            title="Dismiss for this vault"
-            aria-label="Dismiss"
-            className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded text-ink-500 hover:bg-current/10 hover:text-ink-800"
-          >
-            <CloseIcon width={12} height={12} />
-          </button>
-          <p className="pr-5 text-xs font-semibold text-ink-900">
-            Notes at your vault root aren’t shown
-          </p>
-          <p className="mt-1 text-xs leading-5 text-ink-600">
-            This vault is in <span className="font-medium text-ink-800">Inbox</span> mode, so
-            top-level files and folders are hidden, which is intentional for many setups. Switch to{" "}
-            <span className="font-medium text-ink-800">Vault root</span> to show them, or dismiss
-            this notice.
-          </p>
-          <div className="mt-2 flex items-center gap-2">
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() =>
-                void setVaultSettings({ ...vaultSettings, primaryNotesLocation: "root" })
-              }
+            <header className="flex shrink-0 items-center gap-1 px-3 pb-2">
+              <h2 className="min-w-0 flex-1 truncate text-base font-semibold">
+                知识库
+              </h2>
+              {(["create", "options"] as const).map((action) => {
+                const idx = idxCounter.current.value++;
+                return (
+                  <button
+                    key={action}
+                    type="button"
+                    title={
+                      action === "create"
+                        ? "Create… (note, drawing, folder, database)"
+                        : "Knowledge panel options"
+                    }
+                    aria-label={action === "create" ? "创建" : "知识库选项"}
+                    data-sidebar-type={action}
+                    data-sidebar-idx={idx}
+                    className={`zn-panel-header-button flex h-8 w-8 items-center justify-center rounded-md text-xl [@media(hover:hover)]:hover:bg-paper-200/70 ${vimCursor === idx ? "vim-cursor" : ""}`}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      (action === "create" ? setRootMenu : setSortMenu)({
+                        x: rect.left,
+                        y: rect.bottom + 4,
+                      });
+                    }}
+                    onClick={(event) => {
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      (action === "create" ? setRootMenu : setSortMenu)({
+                        x: rect.left,
+                        y: rect.bottom + 4,
+                      });
+                    }}
+                  >
+                    {action === "create" ? "＋" : "⋯"}
+                  </button>
+                );
+              })}
+            </header>
+            <div className="shrink-0 px-3">
+              <button
+                onClick={() => setSearchOpen(true)}
+                title="搜索"
+                aria-label="搜索"
+                data-sidebar-type="search"
+                data-sidebar-idx={idxCounter.current.value++}
+                className={`flex h-9 w-full items-center gap-2 rounded-lg border border-paper-300 px-2 text-left text-sm text-ink-600 [@media(hover:hover)]:hover:bg-paper-200/70 ${vimCursor === idxCounter.current.value - 1 ? "vim-cursor" : ""}`}
+              >
+                <SearchIcon />
+                <span className="flex-1 truncate">搜索</span>
+                <kbd className="zn-navigation-key-hint text-2xs">⌘P</kbd>
+              </button>
+            </div>
+            <div
+              role="tablist"
+              aria-label="知识库"
+              className="mx-3 mt-3 flex shrink-0 rounded-lg border border-paper-300 p-0.5"
             >
-              Switch to Vault root
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => dismissRootContentBanner()}>
-              Dismiss
-            </Button>
-          </div>
-        </div>
-      )}
+              {(
+                [
+                  ["files", "文件"],
+                  ["recent", "最近"],
+                  ["tags", "标签"],
+                ] as const
+              ).map(([tab, label]) => {
+                const idx = idxCounter.current.value++;
+                return (
+                  <button
+                    key={tab}
+                    id={`knowledge-tab-${tab}`}
+                    role="tab"
+                    aria-selected={panelTab === tab}
+                    aria-controls="knowledge-panel-content"
+                    data-sidebar-type={`panel-tab-${tab}`}
+                    data-sidebar-idx={idx}
+                    className={`zn-panel-segment h-8 min-w-0 flex-1 rounded-md text-sm ${panelTab === tab ? "bg-paper-300/70 text-ink-900 font-medium" : "text-ink-600 [@media(hover:hover)]:hover:bg-paper-200/70"} ${vimCursor === idx ? "vim-cursor" : ""}`}
+                    onClick={() => selectPanelTab(tab)}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
 
-      {/* Main scrollable tree area */}
-      <div
-        ref={sidebarScrollRef}
-        className="zn-sidebar-scroll mt-3 min-h-0 flex-1 overflow-y-auto px-3"
-        style={{ scrollbarGutter: "stable" }}
-        onClick={(e) => {
-          if (e.target === e.currentTarget) setFocusedPanel("editor");
-        }}
-        onContextMenu={(e) => {
-          // Right-clicking the empty area (not a row) creates at the vault root.
-          if (e.target === e.currentTarget) {
-            e.preventDefault();
-            setRootMenu({ x: e.clientX, y: e.clientY });
-          }
-        }}
-      >
-        <div
-          className="flex min-h-full flex-col pb-2"
-          onContextMenu={(e) => {
-            if (e.target === e.currentTarget) {
-              e.preventDefault();
-              setRootMenu({ x: e.clientX, y: e.clientY });
-            }
-          }}
-        >
-          {favoriteItems.length > 0 && (
-            <>
-              <SidebarSectionHeading label="Favorites" />
-              {favoriteItems.map((item) => {
-                  const idx = idxCounter.current.value++;
-                  const vimHighlight = vimCursor === idx;
-                  if (item.kind === "note") {
-                    // A favorited note keeps the icon and color it carries in
-                    // the tree; the row used to hardcode the document glyph,
-                    // so the same note looked different two sections apart.
-                    const customIconId = vaultSettings.folderIcons[item.path];
-                    return (
-                      <FavoriteRow
-                        key={item.key}
-                        label={item.title || "Untitled"}
-                        icon={
-                          customIconId ? (
-                            iconOptionById(customIconId).icon
-                          ) : item.isDrawing ? (
-                            <ExcalidrawIcon width={13} height={13} />
-                          ) : (
-                            <DocumentIcon width={13} height={13} />
-                          )
-                        }
-                        colorClass={
-                          colorGlyphClassById(
-                            vaultSettings.folderColors[item.path],
-                          ) ?? undefined
-                        }
-                        active={selectedPath === item.path}
-                        onClick={() => {
-                          setFocusedPanel("editor");
-                          handleSelectNote(item.path);
-                        }}
-                        onContextMenu={(e) => {
-                          const note = notes.find((n) => n.path === item.path);
-                          if (note) openNoteMenu(e, note);
-                        }}
-                        sidebarIdx={idx}
-                        vimHighlight={vimHighlight}
-                        sidebarFocused={isSidebarFocused}
-                        dataAttrs={{
-                          "data-sidebar-type": "note",
-                          "data-sidebar-path": item.path,
-                        }}
-                      />
-                    );
+            {/* Main scrollable tree area */}
+            <div
+              ref={sidebarScrollRef}
+              id="knowledge-panel-content"
+              role="tabpanel"
+              aria-labelledby={`knowledge-tab-${panelTab}`}
+              className="zn-sidebar-scroll mt-3 min-h-0 flex-1 overflow-y-auto px-3"
+              style={{ scrollbarGutter: "stable" }}
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setFocusedPanel("editor");
+              }}
+              onContextMenu={(e) => {
+                // Right-clicking the empty area (not a row) creates at the vault root.
+                if (e.target === e.currentTarget) {
+                  e.preventDefault();
+                  setRootMenu({ x: e.clientX, y: e.clientY });
+                }
+              }}
+            >
+              <div
+                className="flex min-h-full flex-col pb-2"
+                onContextMenu={(e) => {
+                  if (e.target === e.currentTarget) {
+                    e.preventDefault();
+                    setRootMenu({ x: e.clientX, y: e.clientY });
                   }
-                  return (
-                    <FavoriteRow
-                      key={item.key}
-                      label={item.label}
+                }}
+              >
+                {panelTab === "files" && (
+                  <>
+                    {rootContentHiddenByInboxMode &&
+                      !rootContentBannerDismissed && (
+                        <div className="relative mx-3 mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+                          <button
+                            type="button"
+                            onClick={() => dismissRootContentBanner()}
+                            title="Dismiss for this vault"
+                            aria-label="Dismiss"
+                            className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded text-ink-500 [@media(hover:hover)]:hover:bg-current/10 [@media(hover:hover)]:hover:text-ink-800"
+                          >
+                            <CloseIcon width={12} height={12} />
+                          </button>
+                          <p className="pr-5 text-xs font-semibold text-ink-900">
+                            Notes at your vault root aren’t shown
+                          </p>
+                          <p className="mt-1 text-xs leading-5 text-ink-600">
+                            This vault is in{" "}
+                            <span className="font-medium text-ink-800">
+                              Inbox
+                            </span>{" "}
+                            mode, so top-level files and folders are hidden,
+                            which is intentional for many setups. Switch to{" "}
+                            <span className="font-medium text-ink-800">
+                              Vault root
+                            </span>{" "}
+                            to show them, or dismiss this notice.
+                          </p>
+                          <div className="mt-2 flex items-center gap-2">
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              onClick={() =>
+                                void setVaultSettings({
+                                  ...vaultSettings,
+                                  primaryNotesLocation: "root",
+                                })
+                              }
+                            >
+                              Switch to Vault root
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => dismissRootContentBanner()}
+                            >
+                              Dismiss
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+
+                    {favoriteItems.length > 0 && (
+                      <>
+                        <SidebarSectionHeading label="Favorites" />
+                        {favoriteItems.map((item) => {
+                          const idx = idxCounter.current.value++;
+                          const vimHighlight = vimCursor === idx;
+                          if (item.kind === "note") {
+                            // A favorited note keeps the icon and color it carries in
+                            // the tree; the row used to hardcode the document glyph,
+                            // so the same note looked different two sections apart.
+                            const customIconId =
+                              vaultSettings.folderIcons[item.path];
+                            return (
+                              <FavoriteRow
+                                key={item.key}
+                                label={item.title || "Untitled"}
+                                icon={
+                                  customIconId ? (
+                                    iconOptionById(customIconId).icon
+                                  ) : item.isDrawing ? (
+                                    <ExcalidrawIcon width={13} height={13} />
+                                  ) : (
+                                    <DocumentIcon width={13} height={13} />
+                                  )
+                                }
+                                colorClass={
+                                  colorGlyphClassById(
+                                    vaultSettings.folderColors[item.path],
+                                  ) ?? undefined
+                                }
+                                active={selectedPath === item.path}
+                                onClick={() => {
+                                  setFocusedPanel("editor");
+                                  handleSelectNote(item.path);
+                                }}
+                                onContextMenu={(e) => {
+                                  const note = notes.find(
+                                    (n) => n.path === item.path,
+                                  );
+                                  if (note) openNoteMenu(e, note);
+                                }}
+                                sidebarIdx={idx}
+                                vimHighlight={vimHighlight}
+                                sidebarFocused={isSidebarFocused}
+                                dataAttrs={{
+                                  "data-sidebar-type": "note",
+                                  "data-sidebar-path": item.path,
+                                }}
+                              />
+                            );
+                          }
+                          return (
+                            <FavoriteRow
+                              key={item.key}
+                              label={item.label}
+                              icon={
+                                resolveFolderIconOption(
+                                  item.folder,
+                                  item.subpath,
+                                  vaultSettings.folderIcons,
+                                ).icon
+                              }
+                              colorClass={
+                                resolveFolderColorGlyphClass(
+                                  item.folder,
+                                  item.subpath,
+                                  vaultSettings.folderColors,
+                                ) ?? undefined
+                              }
+                              active={isFolderActive(item.folder, item.subpath)}
+                              onClick={() => {
+                                setFocusedPanel("editor");
+                                setView({
+                                  kind: "folder",
+                                  folder: item.folder,
+                                  subpath: item.subpath,
+                                });
+                              }}
+                              onContextMenu={(e) =>
+                                openFolderMenu(e, item.folder, item.subpath)
+                              }
+                              sidebarIdx={idx}
+                              vimHighlight={vimHighlight}
+                              sidebarFocused={isSidebarFocused}
+                              dataAttrs={{
+                                "data-sidebar-type": "folder",
+                                "data-sidebar-folder": item.folder,
+                                "data-sidebar-subpath": item.subpath,
+                              }}
+                            />
+                          );
+                        })}
+                      </>
+                    )}
+
+                    <SidebarSectionHeading label="Quick access" />
+
+                    <TaskSidebarRow
+                      active={tasksViewActive}
+                      onClick={() => void openTasksView()}
+                      label={folderLabels.tasks}
+                      sidebarIdx={idxCounter.current.value++}
+                      vimHighlight={vimCursor === idxCounter.current.value - 1}
+                      sidebarFocused={isSidebarFocused}
+                    />
+
+                    {/* Hidden when the feature is off. Because the row is skipped before
+              its props are evaluated, idxCounter never advances for it and the
+              data-sidebar-idx sequence stays contiguous for Vim navigation. */}
+                    {workflowsEnabled && (
+                      <TaskSidebarRow
+                        active={workflowsViewActive}
+                        onClick={() => void openWorkflowsView()}
+                        label="Workflows"
+                        icon={
+                          <WorkflowIcon
+                            width={12}
+                            height={12}
+                            strokeWidth={2.15}
+                          />
+                        }
+                        sidebarType="workflows"
+                        sidebarIdx={idxCounter.current.value++}
+                        vimHighlight={
+                          vimCursor === idxCounter.current.value - 1
+                        }
+                        sidebarFocused={isSidebarFocused}
+                      />
+                    )}
+
+                    {/* Same skip-before-props trick as Workflows above. */}
+                    {atlasEnabled && (
+                      <TaskSidebarRow
+                        active={atlasViewActive}
+                        onClick={() => void openAtlasView()}
+                        label="Atlas"
+                        icon={
+                          <AtlasIcon
+                            width={12}
+                            height={12}
+                            strokeWidth={2.15}
+                          />
+                        }
+                        sidebarType="atlas"
+                        sidebarIdx={idxCounter.current.value++}
+                        vimHighlight={
+                          vimCursor === idxCounter.current.value - 1
+                        }
+                        sidebarFocused={isSidebarFocused}
+                      />
+                    )}
+
+                    <FolderTreeRoot
+                      label={folderLabels.quick}
                       icon={
                         resolveFolderIconOption(
-                          item.folder,
-                          item.subpath,
+                          "quick",
+                          "",
                           vaultSettings.folderIcons,
                         ).icon
                       }
-                      colorClass={
-                        resolveFolderColorGlyphClass(
-                          item.folder,
-                          item.subpath,
-                          vaultSettings.folderColors,
-                        ) ?? undefined
-                      }
-                      active={isFolderActive(item.folder, item.subpath)}
-                      onClick={() => {
-                        setFocusedPanel("editor");
-                        setView({
-                          kind: "folder",
-                          folder: item.folder,
-                          subpath: item.subpath,
-                        });
-                      }}
-                      onContextMenu={(e) =>
-                        openFolderMenu(e, item.folder, item.subpath)
-                      }
-                      sidebarIdx={idx}
-                      vimHighlight={vimHighlight}
+                      folder="quick"
+                      tree={trees.quick}
+                      vaultSettings={vaultSettings}
+                      isFolderActive={isFolderActive}
+                      collapsed={collapsed}
+                      toggleCollapse={toggleCollapse}
+                      setView={setView}
+                      onContextMenu={openFolderMenu}
+                      showNotes={unifiedSidebar}
+                      selectedPath={selectedPath}
+                      vaultRoot={vault?.root ?? null}
+                      onSelectNote={handleSelectNote}
+                      onOpenAsset={openAssetInTab}
+                      onNoteContextMenu={openNoteMenu}
+                      onAssetContextMenu={openAssetMenu}
+                      sortComparator={treeSortComparator}
+                      onDropOnFolder={handleDropOnFolder}
+                      selectedKeys={selectedSidebarKeys}
+                      onSelectItem={handleSidebarItemSelect}
+                      dragPayloadForItem={dragPayloadForItem}
+                      idxCounter={idxCounter.current}
+                      idxPass={idxPass}
+                      vimCursor={vimCursor}
                       sidebarFocused={isSidebarFocused}
-                      dataAttrs={{
-                        "data-sidebar-type": "folder",
-                        "data-sidebar-folder": item.folder,
-                        "data-sidebar-subpath": item.subpath,
-                      }}
-                    />
-                  );
-                })}
-            </>
-          )}
-
-          <SidebarSectionHeading label="Quick access" />
-
-          <TaskSidebarRow
-            active={tasksViewActive}
-            onClick={() => void openTasksView()}
-            label={folderLabels.tasks}
-            sidebarIdx={idxCounter.current.value++}
-            vimHighlight={vimCursor === idxCounter.current.value - 1}
-            sidebarFocused={isSidebarFocused}
-          />
-
-          {/* Hidden when the feature is off. Because the row is skipped before
-              its props are evaluated, idxCounter never advances for it and the
-              data-sidebar-idx sequence stays contiguous for Vim navigation. */}
-          {workflowsEnabled && (
-            <TaskSidebarRow
-              active={workflowsViewActive}
-              onClick={() => void openWorkflowsView()}
-              label="Workflows"
-              icon={<WorkflowIcon width={12} height={12} strokeWidth={2.15} />}
-              sidebarType="workflows"
-              sidebarIdx={idxCounter.current.value++}
-              vimHighlight={vimCursor === idxCounter.current.value - 1}
-              sidebarFocused={isSidebarFocused}
-            />
-          )}
-
-          {/* Same skip-before-props trick as Workflows above. */}
-          {atlasEnabled && (
-            <TaskSidebarRow
-              active={atlasViewActive}
-              onClick={() => void openAtlasView()}
-              label="Atlas"
-              icon={<AtlasIcon width={12} height={12} strokeWidth={2.15} />}
-              sidebarType="workflows"
-              sidebarIdx={idxCounter.current.value++}
-              vimHighlight={vimCursor === idxCounter.current.value - 1}
-              sidebarFocused={isSidebarFocused}
-            />
-          )}
-
-          <FolderTreeRoot
-            label={folderLabels.quick}
-            icon={
-              resolveFolderIconOption("quick", "", vaultSettings.folderIcons).icon
-            }
-            folder="quick"
-            tree={trees.quick}
-            vaultSettings={vaultSettings}
-            isFolderActive={isFolderActive}
-            collapsed={collapsed}
-            toggleCollapse={toggleCollapse}
-            setView={setView}
-            onContextMenu={openFolderMenu}
-            showNotes={unifiedSidebar}
-            selectedPath={selectedPath}
-            vaultRoot={vault?.root ?? null}
-            onSelectNote={handleSelectNote}
-            onOpenAsset={openAssetInTab}
-            onNoteContextMenu={openNoteMenu}
-            onAssetContextMenu={openAssetMenu}
-            sortComparator={treeSortComparator}
-            onDropOnFolder={handleDropOnFolder}
-            selectedKeys={selectedSidebarKeys}
-            onSelectItem={handleSidebarItemSelect}
-            dragPayloadForItem={dragPayloadForItem}
-            idxCounter={idxCounter.current}
-            idxPass={idxPass}
-            vimCursor={vimCursor}
-            sidebarFocused={isSidebarFocused}
-            groupByKind={groupByKind}
-            showSidebarChevrons={showSidebarChevrons}
-            headerAction={
-              <button
-                type="button"
-                title={`New note in ${folderLabels.quick} (⇧⌘N)`}
-                aria-label={`New note in ${folderLabels.quick}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const title = resolveQuickNoteTitle(
-                    notes,
-                    quickNoteDateTitle,
-                    quickNoteTitlePrefix ?? undefined,
-                  );
-                  void createAndOpen("quick", "", { title, focusTitle: true });
-                }}
-                className="mr-1 flex h-6 w-6 items-center justify-center rounded-md bg-current/0 text-current transition-colors hover:bg-current/15"
-              >
-                <PlusIcon width={16} height={16} strokeWidth={2.5} />
-              </button>
-            }
-          />
-
-          <DateNotesNav
-            dateNav={dateNav}
-            expanded={dateNavExpanded}
-            onToggle={toggleDateNav}
-            dailyIcon={<CalendarIcon />}
-            weeklyIcon={<CalendarIcon />}
-            monthlyIcon={<CalendarIcon />}
-            isFolderActive={isFolderActive}
-            selectedPath={selectedPath}
-            selectedKeys={selectedSidebarKeys}
-            sidebarFocused={isSidebarFocused}
-            showSidebarChevrons={showSidebarChevrons}
-            onSelectNote={handleSelectNote}
-            onSelectItem={handleSidebarItemSelect}
-            onNoteContextMenu={openNoteMenu}
-            dragPayloadForItem={dragPayloadForItem}
-            onRootContextMenu={(e, subpath) => openFolderMenu(e, "inbox", subpath)}
-            idxCounter={idxCounter.current}
-            vimCursor={vimCursor}
-          />
-
-          <SidebarSectionHeading
-            label="Notes"
-            onDropPayload={
-              primaryNotesAtRoot
-                ? (payload) => handleDropOnFolder(payload, "inbox", "")
-                : undefined
-            }
-          />
-
-          {primaryNotesAtRoot ? (
-            <RootFolderDropTarget
-              onDropPayload={(payload) => handleDropOnFolder(payload, "inbox", "")}
-            >
-              <FolderTreeContents
-                tree={trees.inbox}
-                depth={0}
-                folder="inbox"
-                vaultSettings={vaultSettings}
-                isFolderActive={isFolderActive}
-                collapsed={collapsed}
-                toggleCollapse={toggleCollapse}
-                setView={setView}
-                onContextMenu={openFolderMenu}
-                showNotes={unifiedSidebar}
-                selectedPath={selectedPath}
-                vaultRoot={vault?.root ?? null}
-                onSelectNote={handleSelectNote}
-                onOpenAsset={openAssetInTab}
-                onNoteContextMenu={openNoteMenu}
-                onAssetContextMenu={openAssetMenu}
-                sortComparator={treeSortComparator}
-                onDropOnFolder={handleDropOnFolder}
-                selectedKeys={selectedSidebarKeys}
-                onSelectItem={handleSidebarItemSelect}
-                dragPayloadForItem={dragPayloadForItem}
-                idxCounter={idxCounter.current}
-                idxPass={idxPass}
-                vimCursor={vimCursor}
-                sidebarFocused={isSidebarFocused}
-                groupByKind={groupByKind}
-                showSidebarChevrons={showSidebarChevrons}
-              />
-            </RootFolderDropTarget>
-          ) : (
-            <FolderTreeRoot
-              label={folderLabels.inbox}
-              icon={
-                resolveFolderIconOption("inbox", "", vaultSettings.folderIcons).icon
-              }
-              folder="inbox"
-              tree={trees.inbox}
-              vaultSettings={vaultSettings}
-              isFolderActive={isFolderActive}
-              collapsed={collapsed}
-              toggleCollapse={toggleCollapse}
-              setView={setView}
-              onContextMenu={openFolderMenu}
-              showNotes={unifiedSidebar}
-              selectedPath={selectedPath}
-              vaultRoot={vault?.root ?? null}
-              onSelectNote={handleSelectNote}
-              onOpenAsset={openAssetInTab}
-              onNoteContextMenu={openNoteMenu}
-              onAssetContextMenu={openAssetMenu}
-              sortComparator={treeSortComparator}
-              onDropOnFolder={handleDropOnFolder}
-              selectedKeys={selectedSidebarKeys}
-              onSelectItem={handleSidebarItemSelect}
-              dragPayloadForItem={dragPayloadForItem}
-              idxCounter={idxCounter.current}
-              idxPass={idxPass}
-              vimCursor={vimCursor}
-              sidebarFocused={isSidebarFocused}
-              groupByKind={groupByKind}
-              showSidebarChevrons={showSidebarChevrons}
-            />
-          )}
-
-          {/* Tags pinned to the bottom of the tree, directly above System
-              (mt-auto absorbs the free space above them). */}
-          {tags.length > 0 && (
-            <div className="mt-auto pt-4">
-              <button
-                type="button"
-                onClick={() => setTagsCollapsed(!tagsCollapsed)}
-                title={tagsCollapsed ? "Show tags" : "Hide tags"}
-                aria-expanded={!tagsCollapsed}
-                className="flex w-full items-center gap-1 rounded px-2 pb-2 text-xs font-medium uppercase tracking-wide text-ink-500 transition-colors hover:text-ink-800"
-              >
-                <span>Tags</span>
-                <span className="ml-1 text-ink-500 normal-case tracking-normal">
-                  {tags.length}
-                </span>
-              </button>
-              {!tagsCollapsed &&
-                (nestedTags ? (
-                  // #439: hierarchical `/`-separated tags as a collapsible tree.
-                  // A leaf (or a real tag) selects on click; a pure grouping node
-                  // (no note carries it exactly) toggles instead. The disclosure
-                  // triangle always expands/collapses.
-                  <div className="flex flex-col gap-1.5 px-1 pt-0.5">
-                    {visibleTagRows.map((node) => {
-                      const hasChildren = node.children.length > 0;
-                      const collapsed = collapsedTagSet.has(node.path);
-                      const active =
-                        tagsViewActive && selectedTags.includes(node.path);
-                      const tagIdx = idxCounter.current.value++;
-                      const isVimHighlight = vimCursor === tagIdx;
-                      return (
-                        <div
-                          key={node.path}
-                          data-sidebar-idx={tagIdx}
-                          data-sidebar-type="tag"
-                          data-sidebar-tag={node.path}
-                          data-sidebar-tag-expandable={
-                            hasChildren ? "1" : undefined
-                          }
-                          data-sidebar-tag-real={node.isTag ? "1" : undefined}
-                          style={{ paddingLeft: `${node.depth * 14}px` }}
-                          className="flex items-center gap-1"
+                      groupByKind={groupByKind}
+                      showSidebarChevrons={showSidebarChevrons}
+                      headerAction={
+                        <button
+                          type="button"
+                          title={`New note in ${folderLabels.quick} (⇧⌘N)`}
+                          aria-label={`New note in ${folderLabels.quick}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const title = resolveQuickNoteTitle(
+                              notes,
+                              quickNoteDateTitle,
+                              quickNoteTitlePrefix ?? undefined,
+                            );
+                            void createAndOpen("quick", "", {
+                              title,
+                              focusTitle: true,
+                            });
+                          }}
+                          className="mr-1 flex h-6 w-6 items-center justify-center rounded-md bg-current/0 text-current transition-colors [@media(hover:hover)]:hover:bg-current/15"
                         >
-                          {hasChildren ? (
-                            <button
-                              type="button"
-                              title={collapsed ? "Expand" : "Collapse"}
-                              aria-label={collapsed ? "Expand" : "Collapse"}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleCollapseTagNode(node.path);
-                              }}
-                              className="flex h-6 w-4 shrink-0 items-center justify-center text-ink-500 outline-none transition-colors hover:text-ink-800 focus:outline-none focus-visible:outline-none"
+                          <PlusIcon width={16} height={16} strokeWidth={2.5} />
+                        </button>
+                      }
+                    />
+
+                    <DateNotesNav
+                      dateNav={dateNav}
+                      expanded={dateNavExpanded}
+                      onToggle={toggleDateNav}
+                      dailyIcon={<CalendarIcon />}
+                      weeklyIcon={<CalendarIcon />}
+                      monthlyIcon={<CalendarIcon />}
+                      isFolderActive={isFolderActive}
+                      selectedPath={selectedPath}
+                      selectedKeys={selectedSidebarKeys}
+                      sidebarFocused={isSidebarFocused}
+                      showSidebarChevrons={showSidebarChevrons}
+                      onSelectNote={handleSelectNote}
+                      onSelectItem={handleSidebarItemSelect}
+                      onNoteContextMenu={openNoteMenu}
+                      dragPayloadForItem={dragPayloadForItem}
+                      onRootContextMenu={(e, subpath) =>
+                        openFolderMenu(e, "inbox", subpath)
+                      }
+                      idxCounter={idxCounter.current}
+                      vimCursor={vimCursor}
+                    />
+
+                    <SidebarSectionHeading
+                      label="Notes"
+                      onDropPayload={
+                        primaryNotesAtRoot
+                          ? (payload) =>
+                              handleDropOnFolder(payload, "inbox", "")
+                          : undefined
+                      }
+                    />
+
+                    {primaryNotesAtRoot ? (
+                      <RootFolderDropTarget
+                        onDropPayload={(payload) =>
+                          handleDropOnFolder(payload, "inbox", "")
+                        }
+                      >
+                        <FolderTreeContents
+                          tree={trees.inbox}
+                          depth={0}
+                          folder="inbox"
+                          vaultSettings={vaultSettings}
+                          isFolderActive={isFolderActive}
+                          collapsed={collapsed}
+                          toggleCollapse={toggleCollapse}
+                          setView={setView}
+                          onContextMenu={openFolderMenu}
+                          showNotes={unifiedSidebar}
+                          selectedPath={selectedPath}
+                          vaultRoot={vault?.root ?? null}
+                          onSelectNote={handleSelectNote}
+                          onOpenAsset={openAssetInTab}
+                          onNoteContextMenu={openNoteMenu}
+                          onAssetContextMenu={openAssetMenu}
+                          sortComparator={treeSortComparator}
+                          onDropOnFolder={handleDropOnFolder}
+                          selectedKeys={selectedSidebarKeys}
+                          onSelectItem={handleSidebarItemSelect}
+                          dragPayloadForItem={dragPayloadForItem}
+                          idxCounter={idxCounter.current}
+                          idxPass={idxPass}
+                          vimCursor={vimCursor}
+                          sidebarFocused={isSidebarFocused}
+                          groupByKind={groupByKind}
+                          showSidebarChevrons={showSidebarChevrons}
+                        />
+                      </RootFolderDropTarget>
+                    ) : (
+                      <FolderTreeRoot
+                        label={folderLabels.inbox}
+                        icon={
+                          resolveFolderIconOption(
+                            "inbox",
+                            "",
+                            vaultSettings.folderIcons,
+                          ).icon
+                        }
+                        folder="inbox"
+                        tree={trees.inbox}
+                        vaultSettings={vaultSettings}
+                        isFolderActive={isFolderActive}
+                        collapsed={collapsed}
+                        toggleCollapse={toggleCollapse}
+                        setView={setView}
+                        onContextMenu={openFolderMenu}
+                        showNotes={unifiedSidebar}
+                        selectedPath={selectedPath}
+                        vaultRoot={vault?.root ?? null}
+                        onSelectNote={handleSelectNote}
+                        onOpenAsset={openAssetInTab}
+                        onNoteContextMenu={openNoteMenu}
+                        onAssetContextMenu={openAssetMenu}
+                        sortComparator={treeSortComparator}
+                        onDropOnFolder={handleDropOnFolder}
+                        selectedKeys={selectedSidebarKeys}
+                        onSelectItem={handleSidebarItemSelect}
+                        dragPayloadForItem={dragPayloadForItem}
+                        idxCounter={idxCounter.current}
+                        idxPass={idxPass}
+                        vimCursor={vimCursor}
+                        sidebarFocused={isSidebarFocused}
+                        groupByKind={groupByKind}
+                        showSidebarChevrons={showSidebarChevrons}
+                      />
+                    )}
+                  </>
+                )}
+                {panelTab === "recent" && (
+                  <SidebarRecent
+                    idxCounter={idxCounter.current}
+                    idxPass={idxPass}
+                    vimCursor={vimCursor}
+                  />
+                )}
+                {/* Only the selected tab renders indexed rows. */}
+                {panelTab === "tags" && (
+                  <div className="pt-1">
+                    <p className="px-2 pb-2 text-xs text-ink-500">
+                      标签 · {tags.length}
+                    </p>
+                    {nestedTags ? (
+                      // #439: hierarchical `/`-separated tags as a collapsible tree.
+                      // A leaf (or a real tag) selects on click; a pure grouping node
+                      // (no note carries it exactly) toggles instead. The disclosure
+                      // triangle always expands/collapses.
+                      <div className="flex flex-col gap-1.5 px-1 pt-0.5">
+                        {visibleTagRows.map((node) => {
+                          const hasChildren = node.children.length > 0;
+                          const collapsed = collapsedTagSet.has(node.path);
+                          const active =
+                            tagsViewActive && selectedTags.includes(node.path);
+                          const tagIdx = idxCounter.current.value++;
+                          const isVimHighlight = vimCursor === tagIdx;
+                          return (
+                            <div
+                              key={node.path}
+                              data-sidebar-idx={tagIdx}
+                              data-sidebar-type="tag"
+                              data-sidebar-tag={node.path}
+                              data-sidebar-tag-expandable={
+                                hasChildren ? "1" : undefined
+                              }
+                              data-sidebar-tag-real={
+                                node.isTag ? "1" : undefined
+                              }
+                              style={{ paddingLeft: `${node.depth * 14}px` }}
+                              className="flex items-center gap-1"
                             >
-                              <svg
-                                viewBox="0 0 24 24"
-                                width="9"
-                                height="9"
-                                aria-hidden="true"
-                                className={collapsed ? "" : "rotate-90"}
-                              >
-                                <path
-                                  d="M9 6l6 6-6 6"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2.5"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                            </button>
-                          ) : (
-                            <span className="h-6 w-4 shrink-0" />
-                          )}
-                          {/* A rounded chip keeps each tag reading as a tag (not a
+                              {hasChildren ? (
+                                <button
+                                  type="button"
+                                  title={collapsed ? "Expand" : "Collapse"}
+                                  aria-label={collapsed ? "Expand" : "Collapse"}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleCollapseTagNode(node.path);
+                                  }}
+                                  className="flex h-6 w-4 shrink-0 items-center justify-center text-ink-500 outline-none transition-colors [@media(hover:hover)]:hover:text-ink-800 focus:outline-none focus-visible:outline-none"
+                                >
+                                  <svg
+                                    viewBox="0 0 24 24"
+                                    width="9"
+                                    height="9"
+                                    aria-hidden="true"
+                                    className={collapsed ? "" : "rotate-90"}
+                                  >
+                                    <path
+                                      d="M9 6l6 6-6 6"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2.5"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                  </svg>
+                                </button>
+                              ) : (
+                                <span className="h-6 w-4 shrink-0" />
+                              )}
+                              {/* A rounded chip keeps each tag reading as a tag (not a
                               file row); real tags are filled, grouping nodes are a
                               fainter chip. (#439) */}
-                          <button
-                            type="button"
-                            title={node.isTag ? `#${node.path}` : node.path}
-                            onClick={() => {
-                              if (node.isTag) void openTagView(node.path);
-                              else toggleCollapseTagNode(node.path);
-                            }}
-                            onContextMenu={
-                              node.isTag
-                                ? (e) => {
-                                    e.preventDefault();
-                                    setTagMenu({
-                                      x: e.clientX,
-                                      y: e.clientY,
-                                      tag: node.path,
-                                    });
-                                  }
-                                : undefined
-                            }
-                            className={[
-                              "inline-flex min-w-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs outline-none transition-colors focus:outline-none focus-visible:outline-none",
-                              active
-                                ? isVimHighlight
-                                  ? "vim-cursor-on-active bg-paper-300/70 text-ink-900 font-medium"
-                                  : isSidebarFocused
-                                    ? "bg-accent/15 text-accent font-medium"
-                                    : "bg-paper-300/70 text-ink-900 font-medium"
-                                : isVimHighlight
-                                  ? "vim-cursor"
-                                  : node.isTag
-                                    ? "bg-paper-200 text-ink-800 hover:bg-paper-300"
-                                    : "bg-paper-200/40 text-ink-500 hover:bg-paper-200/80",
-                            ].join(" ")}
-                          >
-                            <span className="truncate">
-                              {node.isTag ? "#" : ""}
-                              {node.name}
-                            </span>
-                            <span
+                              <button
+                                type="button"
+                                title={node.isTag ? `#${node.path}` : node.path}
+                                onClick={() => {
+                                  if (node.isTag) void openTagView(node.path);
+                                  else toggleCollapseTagNode(node.path);
+                                }}
+                                onContextMenu={
+                                  node.isTag
+                                    ? (e) => {
+                                        e.preventDefault();
+                                        setTagMenu({
+                                          x: e.clientX,
+                                          y: e.clientY,
+                                          tag: node.path,
+                                        });
+                                      }
+                                    : undefined
+                                }
+                                className={[
+                                  "inline-flex min-w-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs outline-none transition-colors focus:outline-none focus-visible:outline-none",
+                                  active
+                                    ? isVimHighlight
+                                      ? "vim-cursor-on-active bg-paper-300/70 text-ink-900 font-medium"
+                                      : isSidebarFocused
+                                        ? "bg-accent/15 text-accent font-medium"
+                                        : "bg-paper-300/70 text-ink-900 font-medium"
+                                    : isVimHighlight
+                                      ? "vim-cursor"
+                                      : node.isTag
+                                        ? "bg-paper-200 text-ink-800 [@media(hover:hover)]:hover:bg-paper-300"
+                                        : "bg-paper-200/40 text-ink-500 [@media(hover:hover)]:hover:bg-paper-200/80",
+                                ].join(" ")}
+                              >
+                                <span className="truncate">
+                                  {node.isTag ? "#" : ""}
+                                  {node.name}
+                                </span>
+                                <span
+                                  className={[
+                                    "text-2xs",
+                                    active && !isSidebarFocused
+                                      ? "text-ink-700"
+                                      : "text-ink-500",
+                                  ].join(" ")}
+                                >
+                                  {node.isTag ? node.count : node.subtreeCount}
+                                </span>
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5 px-1">
+                        {tags.map(([tag, count]) => {
+                          // Tag chips feed into a single vault-wide Tags tab. If the
+                          // tab is already open, clicking a chip toggles that tag in
+                          // the selection (narrower / wider result set). Otherwise
+                          // opening one starts the selection with just this tag.
+                          const active =
+                            tagsViewActive && selectedTags.includes(tag);
+                          const tagIdx = idxCounter.current.value++;
+                          const isVimHighlight = vimCursor === tagIdx;
+                          return (
+                            <button
+                              key={tag}
+                              onClick={() => {
+                                void openTagView(tag);
+                              }}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                setTagMenu({ x: e.clientX, y: e.clientY, tag });
+                              }}
                               className={[
-                                "text-2xs",
-                                active && !isSidebarFocused
-                                  ? "text-ink-700"
-                                  : "text-ink-500",
+                                "rounded-full px-2.5 py-1 text-xs transition-colors",
+                                active
+                                  ? isVimHighlight
+                                    ? "vim-cursor-on-active bg-paper-300/70 text-ink-900 font-medium"
+                                    : isSidebarFocused
+                                      ? "text-accent"
+                                      : "bg-paper-300/70 text-ink-900 font-medium"
+                                  : isVimHighlight
+                                    ? "vim-cursor"
+                                    : "bg-paper-200 text-ink-800 [@media(hover:hover)]:hover:bg-paper-300",
                               ].join(" ")}
+                              data-sidebar-idx={tagIdx}
+                              data-sidebar-type="tag"
+                              data-sidebar-tag={tag}
                             >
-                              {node.isTag ? node.count : node.subtreeCount}
-                            </span>
-                          </button>
-                        </div>
-                      );
-                    })}
+                              #{tag}
+                              <span
+                                className={[
+                                  "ml-1 text-2xs",
+                                  active && !isSidebarFocused
+                                    ? "text-ink-700"
+                                    : "text-ink-500",
+                                ].join(" ")}
+                              >
+                                {count}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <div className="flex flex-wrap gap-1.5 px-1">
-                    {tags.map(([tag, count]) => {
-                      // Tag chips feed into a single vault-wide Tags tab. If the
-                      // tab is already open, clicking a chip toggles that tag in
-                      // the selection (narrower / wider result set). Otherwise
-                      // opening one starts the selection with just this tag.
-                      const active =
-                        tagsViewActive && selectedTags.includes(tag);
-                      const tagIdx = idxCounter.current.value++;
-                      const isVimHighlight = vimCursor === tagIdx;
-                      return (
-                        <button
-                          key={tag}
-                          onClick={() => {
-                            void openTagView(tag);
-                          }}
-                          onContextMenu={(e) => {
-                            e.preventDefault();
-                            setTagMenu({ x: e.clientX, y: e.clientY, tag });
-                          }}
-                          className={[
-                            "rounded-full px-2.5 py-1 text-xs transition-colors",
-                            active
-                              ? isVimHighlight
-                                ? "vim-cursor-on-active bg-paper-300/70 text-ink-900 font-medium"
-                                : isSidebarFocused
-                                  ? "text-accent"
-                                  : "bg-paper-300/70 text-ink-900 font-medium"
-                              : isVimHighlight
-                                ? "vim-cursor"
-                                : "bg-paper-200 text-ink-800 hover:bg-paper-300",
-                          ].join(" ")}
-                          data-sidebar-idx={tagIdx}
-                          data-sidebar-type="tag"
-                          data-sidebar-tag={tag}
-                        >
-                          #{tag}
-                          <span
-                            className={[
-                              "ml-1 text-2xs",
-                              active && !isSidebarFocused
-                                ? "text-ink-700"
-                                : "text-ink-500",
-                            ].join(" ")}
-                          >
-                            {count}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ))}
+                )}
+              </div>
             </div>
+            <div className="zn-sidebar-footer-safe shrink-0 border-t border-paper-300 px-3 py-2">
+              <SidebarIndexGroup
+                counter={idxCounter.current}
+                pass={idxPass}
+                render={() => (
+                  <>
+                    <SystemRow
+                      icon={
+                        resolveFolderIconOption(
+                          "archive",
+                          "",
+                          vaultSettings.folderIcons,
+                        ).icon
+                      }
+                      label={folderLabels.archive}
+                      count={countNotesInTree(trees.archive)}
+                      active={
+                        archiveViewActive ||
+                        (view.kind === "folder" && view.folder === "archive") ||
+                        !!selectedPath?.startsWith("archive/")
+                      }
+                      onClick={() => void openArchiveView()}
+                      onContextMenu={(e) => openFolderMenu(e, "archive", "")}
+                      sidebarIdx={idxCounter.current.value++}
+                      vimHighlight={vimCursor === idxCounter.current.value - 1}
+                      sidebarFocused={isSidebarFocused}
+                      sidebarType="archive"
+                    />
+                    <SystemRow
+                      icon={
+                        resolveFolderIconOption(
+                          "trash",
+                          "",
+                          vaultSettings.folderIcons,
+                        ).icon
+                      }
+                      label={folderLabels.trash}
+                      count={countNotesInTree(trees.trash)}
+                      active={
+                        trashViewActive || !!selectedPath?.startsWith("trash/")
+                      }
+                      onClick={() => void openTrashView()}
+                      onContextMenu={(e) => openFolderMenu(e, "trash", "")}
+                      sidebarIdx={idxCounter.current.value++}
+                      vimHighlight={vimCursor === idxCounter.current.value - 1}
+                      sidebarFocused={isSidebarFocused}
+                      sidebarType="trash"
+                    />
+                    <SystemRow
+                      icon={<PaperclipIcon width={16} height={16} />}
+                      label="附件"
+                      count={assetCount}
+                      active={assetsViewActive}
+                      onClick={() => void openAssetsView()}
+                      onContextMenu={openAssetsRowMenu}
+                      sidebarIdx={idxCounter.current.value++}
+                      vimHighlight={vimCursor === idxCounter.current.value - 1}
+                      sidebarFocused={isSidebarFocused}
+                      sidebarType="assets"
+                    />
+                  </>
+                )}
+              />
+            </div>
+            {!narrow && (
+              <ResizeHandle
+                getWidth={() => sidebarWidth}
+                onResize={(next) => {
+                  if (next !== 0) setSidebarWidth(next);
+                }}
+              />
             )}
+          </aside>
+        )}
 
-          {/* System (Archive / Trash / Assets) sits just below Tags. When there
-              are no tags above it, it carries the bottom-anchoring itself. */}
-          <div className={tags.length > 0 ? "pt-4" : "mt-auto pt-4"}>
-            <SidebarSectionHeading label="System" />
-              <SystemRow
-                icon={resolveFolderIconOption("archive", "", vaultSettings.folderIcons).icon}
-                label={folderLabels.archive}
-                count={countNotesInTree(trees.archive)}
-                active={
-                  archiveViewActive ||
-                  (view.kind === "folder" && view.folder === "archive") ||
-                  !!selectedPath?.startsWith("archive/")
-                }
-                onClick={() => void openArchiveView()}
-                onContextMenu={(e) => openFolderMenu(e, "archive", "")}
-                sidebarIdx={idxCounter.current.value++}
-                vimHighlight={vimCursor === idxCounter.current.value - 1}
-                sidebarFocused={isSidebarFocused}
-                sidebarType="archive"
-              />
-              <SystemRow
-                icon={resolveFolderIconOption("trash", "", vaultSettings.folderIcons).icon}
-                label={folderLabels.trash}
-                count={countNotesInTree(trees.trash)}
-                active={trashViewActive || !!selectedPath?.startsWith("trash/")}
-                onClick={() => void openTrashView()}
-                onContextMenu={(e) => openFolderMenu(e, "trash", "")}
-                sidebarIdx={idxCounter.current.value++}
-                vimHighlight={vimCursor === idxCounter.current.value - 1}
-                sidebarFocused={isSidebarFocused}
-                sidebarType="trash"
-              />
-              <SystemRow
-                icon={<PaperclipIcon width={16} height={16} />}
-                label="Assets"
-                count={assetCount}
-                active={assetsViewActive}
-                onClick={() => void openAssetsView()}
-                onContextMenu={openAssetsRowMenu}
-                sidebarIdx={idxCounter.current.value++}
-                vimHighlight={vimCursor === idxCounter.current.value - 1}
-                sidebarFocused={isSidebarFocused}
-                sidebarType="assets"
-              />
-            </div>
-        </div>
-      </div>
-
-      {/* Footer — vault-level utilities. Kept deliberately small so the
-       *  main tree area dominates; Help and Settings are also reachable
-       *  from the command palette and (for Settings) ⌘,. Trash lives in
-       *  the main tree above and opens its dedicated recovery view.
-       *
-       *  The three labeled actions need ~306px with the file-count badge and
-       *  ~260px without it, but the sidebar resizes down to 160. Below those
-       *  widths the row degrades instead of painting labels over each other
-       *  (#539): first the count folds into the Files tooltip, then the
-       *  labels drop and the icons stand alone. */}
-      <div
-        className="zn-sidebar-footer-safe mt-2 grid h-16 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 px-3"
-        style={{ borderTop: "1px solid var(--glass-stroke)" }}
-      >
-        {hasAssetsDir && canRevealInFileManager && (
-          <SidebarFooterAction
-            icon={<FolderGlyphIcon />}
-            label="Files"
-            title={footerShowsCount ? undefined : `Files · ${assetFiles.length}`}
-            count={footerShowsCount ? assetFiles.length : undefined}
-            iconOnly={!footerShowsLabels}
-            onClick={() => void revealAssetsDir()}
-            sidebarIdx={idxCounter.current.value++}
-            vimHighlight={vimCursor === idxCounter.current.value - 1}
-            sidebarFocused={isSidebarFocused}
-            sidebarData={{ type: "files" }}
+        {tagMenu && (
+          <ContextMenu
+            x={tagMenu.x}
+            y={tagMenu.y}
+            items={tagMenuItems}
+            onClose={() => setTagMenu(null)}
           />
         )}
-        {(!hasAssetsDir || !canRevealInFileManager) && <div />}
-        <SidebarFooterAction
-          icon={<DocumentIcon />}
-          label="Help"
-          iconOnly={!footerShowsLabels}
-          active={helpViewActive}
-          onClick={() => void openHelpView()}
-          sidebarIdx={idxCounter.current.value++}
-          vimHighlight={vimCursor === idxCounter.current.value - 1}
-          sidebarFocused={isSidebarFocused}
-          sidebarData={{ type: "help" }}
-        />
-        <SidebarSettingsAction
-          iconOnly={!footerShowsLabels}
-          onClick={() => setSettingsOpen(true)}
-          sidebarIdx={idxCounter.current.value++}
-          vimHighlight={vimCursor === idxCounter.current.value - 1}
-          sidebarFocused={isSidebarFocused}
-          sidebarData={{ type: "settings" }}
-        />
-      </div>
-
-      {tagMenu && (
-        <ContextMenu
-          x={tagMenu.x}
-          y={tagMenu.y}
-          items={tagMenuItems}
-          onClose={() => setTagMenu(null)}
-        />
-      )}
-      {vaultMenu && (
-        <ContextMenu
-          x={vaultMenu.x}
-          y={vaultMenu.y}
-          items={vaultMenuItems}
-          onClose={() => setVaultMenu(null)}
-        />
-      )}
-      {folderMenu && (
-        <ContextMenu
-          x={folderMenu.x}
-          y={folderMenu.y}
-          items={folderMenuItems}
-          onClose={() => setFolderMenu(null)}
-        />
-      )}
-      {assetsRowMenu && (
-        <ContextMenu
-          x={assetsRowMenu.x}
-          y={assetsRowMenu.y}
-          items={(() => {
-            const state = useStore.getState();
-            const current = state.assetSortOrder;
-            const sortItem = (
-              label: string,
-              field: "name" | "used" | "type" | "size" | "modified",
-            ): ContextMenuItem => {
-              const activeField = current.startsWith(field + "-");
-              const asc = current === field + "-asc";
-              return {
-                label: `Sort by ${label}`,
-                // Re-picking the active field flips its direction, like a
-                // list header; a fresh field starts ascending.
-                hint: activeField ? (asc ? "↑" : "↓") : undefined,
-                onSelect: () =>
-                  state.setAssetSortOrder(
-                    activeField && asc ? `${field}-desc` : `${field}-asc`,
-                  ),
+        {vaultMenu && (
+          <ContextMenu
+            x={vaultMenu.x}
+            y={vaultMenu.y}
+            items={vaultMenuItems}
+            onClose={() => setVaultMenu(null)}
+          />
+        )}
+        {folderMenu && (
+          <ContextMenu
+            x={folderMenu.x}
+            y={folderMenu.y}
+            items={folderMenuItems}
+            onClose={() => setFolderMenu(null)}
+          />
+        )}
+        {assetsRowMenu && (
+          <ContextMenu
+            x={assetsRowMenu.x}
+            y={assetsRowMenu.y}
+            items={(() => {
+              const state = useStore.getState();
+              const current = state.assetSortOrder;
+              const sortItem = (
+                label: string,
+                field: "name" | "used" | "type" | "size" | "modified",
+              ): ContextMenuItem => {
+                const activeField = current.startsWith(field + "-");
+                const asc = current === field + "-asc";
+                return {
+                  label: `Sort by ${label}`,
+                  // Re-picking the active field flips its direction, like a
+                  // list header; a fresh field starts ascending.
+                  hint: activeField ? (asc ? "↑" : "↓") : undefined,
+                  onSelect: () =>
+                    state.setAssetSortOrder(
+                      activeField && asc ? `${field}-desc` : `${field}-asc`,
+                    ),
+                };
               };
-            };
-            return [
-              { label: "Open Assets", onSelect: () => void openAssetsView() },
+              return [
+                { label: "Open Assets", onSelect: () => void openAssetsView() },
+                { kind: "separator" as const },
+                sortItem("name", "name"),
+                sortItem("type", "type"),
+                sortItem("size", "size"),
+                sortItem("last modified", "modified"),
+                sortItem("times used", "used"),
+              ];
+            })()}
+            onClose={() => setAssetsRowMenu(null)}
+          />
+        )}
+        {rootMenu && (
+          <ContextMenu
+            x={rootMenu.x}
+            y={rootMenu.y}
+            items={rootMenuItems}
+            onClose={() => setRootMenu(null)}
+          />
+        )}
+        {noteMenu && (
+          <ContextMenu
+            x={noteMenu.x}
+            y={noteMenu.y}
+            items={noteMenuItems}
+            onClose={() => setNoteMenu(null)}
+          />
+        )}
+        {assetMenu && (
+          <ContextMenu
+            x={assetMenu.x}
+            y={assetMenu.y}
+            items={assetMenuItems}
+            onClose={() => setAssetMenu(null)}
+          />
+        )}
+        {iconPicker && (
+          <FolderIconPickerModal
+            targetLabel={iconPicker.label}
+            currentIconId={vaultSettings.folderIcons[iconPicker.key] ?? null}
+            onSelect={(iconId) => void saveIcon(iconPicker.key, iconId)}
+            onReset={() => void resetIcon(iconPicker.key)}
+            onCancel={() => setIconPicker(null)}
+          />
+        )}
+        {colorPicker && (
+          <FolderColorPickerModal
+            targetLabel={colorPicker.label}
+            currentColorId={vaultSettings.folderColors[colorPicker.key] ?? null}
+            onSelect={(colorId) => void saveColor(colorPicker.key, colorId)}
+            onReset={() => void resetColor(colorPicker.key)}
+            onCancel={() => setColorPicker(null)}
+          />
+        )}
+        {sortMenu && (
+          <ContextMenu
+            x={sortMenu.x}
+            y={sortMenu.y}
+            items={[
+              {
+                label: `Auto-reveal: ${autoReveal ? "on" : "off"}`,
+                onSelect: () => setAutoReveal(!autoReveal),
+              },
+              { label: "Expand all", onSelect: expandAll },
+              { label: "Collapse all", onSelect: collapseAll },
+              ...(hasAssetsDir && canRevealInFileManager
+                ? [
+                    {
+                      label: "Reveal assets folder",
+                      onSelect: () => void revealAssetsDir(),
+                    },
+                  ]
+                : []),
               { kind: "separator" as const },
-              sortItem("name", "name"),
-              sortItem("type", "type"),
-              sortItem("size", "size"),
-              sortItem("last modified", "modified"),
-              sortItem("times used", "used"),
-            ];
-          })()}
-          onClose={() => setAssetsRowMenu(null)}
-        />
-      )}
-      {rootMenu && (
-        <ContextMenu
-          x={rootMenu.x}
-          y={rootMenu.y}
-          items={rootMenuItems}
-          onClose={() => setRootMenu(null)}
-        />
-      )}
-      {noteMenu && (
-        <ContextMenu
-          x={noteMenu.x}
-          y={noteMenu.y}
-          items={noteMenuItems}
-          onClose={() => setNoteMenu(null)}
-        />
-      )}
-      {assetMenu && (
-        <ContextMenu
-          x={assetMenu.x}
-          y={assetMenu.y}
-          items={assetMenuItems}
-          onClose={() => setAssetMenu(null)}
-        />
-      )}
-      {iconPicker && (
-        <FolderIconPickerModal
-          targetLabel={iconPicker.label}
-          currentIconId={vaultSettings.folderIcons[iconPicker.key] ?? null}
-          onSelect={(iconId) => void saveIcon(iconPicker.key, iconId)}
-          onReset={() => void resetIcon(iconPicker.key)}
-          onCancel={() => setIconPicker(null)}
-        />
-      )}
-      {colorPicker && (
-        <FolderColorPickerModal
-          targetLabel={colorPicker.label}
-          currentColorId={vaultSettings.folderColors[colorPicker.key] ?? null}
-          onSelect={(colorId) => void saveColor(colorPicker.key, colorId)}
-          onReset={() => void resetColor(colorPicker.key)}
-          onCancel={() => setColorPicker(null)}
-        />
-      )}
-      {sortMenu && (
-        <ContextMenu
-          x={sortMenu.x}
-          y={sortMenu.y}
-          items={[
-            ...(
-              [
-                ["none", "No sorting"],
-                ["manual", "Manual (drag to reorder)"],
-                ["updated-desc", "Modified (newest first)"],
-                ["updated-asc", "Modified (oldest first)"],
-                ["created-desc", "Created (newest first)"],
-                ["created-asc", "Created (oldest first)"],
-                ["name-asc", "Name (A → Z)"],
-                ["name-desc", "Name (Z → A)"],
-              ] as const
-            ).map(([id, label]) => ({
-              label: `${noteSortOrder === id ? "✓  " : "    "}${label}`,
-              onSelect: () => setNoteSortOrder(id as NoteSortOrder),
-            })),
-            { kind: "separator" as const },
-            {
-              label: `${groupByKind ? "✓  " : "    "}Group by kind`,
-              onSelect: () => setGroupByKind(!groupByKind),
-            },
-          ]}
-          onClose={() => setSortMenu(null)}
-        />
-      )}
-
-      <ResizeHandle
-        getWidth={() => sidebarWidth}
-        onResize={(next) => {
-          if (next === 0) return;
-          setSidebarWidth(next);
-        }}
-      />
-    </aside>
+              ...(
+                [
+                  ["none", "No sorting"],
+                  ["manual", "Manual (drag to reorder)"],
+                  ["updated-desc", "Modified (newest first)"],
+                  ["updated-asc", "Modified (oldest first)"],
+                  ["created-desc", "Created (newest first)"],
+                  ["created-asc", "Created (oldest first)"],
+                  ["name-asc", "Name (A → Z)"],
+                  ["name-desc", "Name (Z → A)"],
+                ] as const
+              ).map(([id, label]) => ({
+                label: `${noteSortOrder === id ? "✓  " : "    "}${label}`,
+                onSelect: () => setNoteSortOrder(id as NoteSortOrder),
+              })),
+              { kind: "separator" as const },
+              {
+                label: `${groupByKind ? "✓  " : "    "}Group by kind`,
+                onSelect: () => setGroupByKind(!groupByKind),
+              },
+            ]}
+            onClose={() => setSortMenu(null)}
+          />
+        )}
+      </>
     </SidebarScrollerContext.Provider>
   );
+}
+
+function SidebarIndexGroup({ counter, pass, render }: { counter: SidebarIdxCounter; pass: SidebarIdxPass; render: () => JSX.Element }): JSX.Element {
+  useStableSidebarIdxBase(counter, pass);
+  return render();
 }
 
 /* ---------- Folder tree data ---------- */
@@ -5305,7 +5283,7 @@ const NoteLeaf = memo(function NoteLeaf({
             ? "bg-accent/[0.09] text-ink-900"
             : vimHighlight
               ? "vim-cursor"
-              : "text-ink-700 hover:bg-paper-200/70",
+              : "text-ink-700 [@media(hover:hover)]:hover:bg-paper-200/70",
       ].join(" ")}
       style={{ paddingLeft: 4 + depth * 14 }}
       {...(sidebarIdx != null
@@ -5477,7 +5455,7 @@ function AssetLeaf({
       onDragStart={handleDragStart}
       className={[
         "group flex h-[var(--z-sidebar-row-h)] w-full items-center gap-1.5 rounded-lg px-1 text-left text-sm outline-none transition-colors focus:outline-none",
-        vimHighlight ? "vim-cursor" : "text-ink-700 hover:bg-paper-200/70",
+        vimHighlight ? "vim-cursor" : "text-ink-700 [@media(hover:hover)]:hover:bg-paper-200/70",
       ].join(" ")}
       style={{ paddingLeft: 4 + depth * 14 }}
       {...(sidebarIdx != null
@@ -5630,7 +5608,7 @@ function TreeRow({
               ? "bg-accent/[0.09] text-ink-900"
             : vimHighlight
               ? "vim-cursor"
-              : "text-ink-800 hover:bg-paper-200/70",
+              : "text-ink-800 [@media(hover:hover)]:hover:bg-paper-200/70",
       ].join(" ")}
       {...(sidebarIdx != null
         ? {
@@ -5657,7 +5635,7 @@ function TreeRow({
           className="relative flex h-5 w-5 shrink-0 items-center justify-center"
           data-vim-hint-ignore
         >
-          <span className="flex h-5 w-5 items-center justify-center group-hover:hidden">
+          <span className="flex h-5 w-5 items-center justify-center [@media(hover:hover)]:group-hover:hidden">
             <SidebarGlyph
               active={strongActive}
               rowActive={active || selected}
@@ -5673,8 +5651,8 @@ function TreeRow({
             }}
             aria-label={collapsed ? "Expand" : "Collapse"}
             className={[
-              "absolute inset-0 hidden items-center justify-center rounded transition-colors group-hover:flex",
-              strongActive ? "text-ink-900" : "text-ink-500 hover:text-ink-900",
+              "absolute inset-0 hidden items-center justify-center rounded transition-colors [@media(hover:hover)]:group-hover:flex",
+              strongActive ? "text-ink-900" : "text-ink-500 [@media(hover:hover)]:hover:text-ink-900",
             ].join(" ")}
           >
             <svg
@@ -5786,6 +5764,8 @@ function TaskSidebarRow({
     <div
       role="button"
       tabIndex={0}
+      title={label}
+      aria-label={label}
       onClick={onClick}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -5803,7 +5783,7 @@ function TaskSidebarRow({
               : "bg-paper-300/70 text-ink-900 font-medium"
           : vimHighlight
             ? "vim-cursor"
-            : "text-ink-800 hover:bg-paper-200/70",
+            : "text-ink-800 [@media(hover:hover)]:hover:bg-paper-200/70",
       ].join(" ")}
       style={{ paddingLeft: 4 }}
       {...(sidebarIdx != null
@@ -5871,7 +5851,7 @@ function FavoriteRow({
               : "bg-paper-300/70 text-ink-900 font-medium"
           : vimHighlight
             ? "vim-cursor"
-            : "text-ink-800 hover:bg-paper-200/70",
+            : "text-ink-800 [@media(hover:hover)]:hover:bg-paper-200/70",
       ].join(" ")}
       style={{ paddingLeft: 4 }}
       {...(sidebarIdx != null ? { "data-sidebar-idx": sidebarIdx } : {})}
@@ -5922,6 +5902,8 @@ function SystemRow({
     <div
       role="button"
       tabIndex={0}
+      title={`${label} · ${count}`}
+      aria-label={label}
       onClick={onClick}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -5940,7 +5922,7 @@ function SystemRow({
               : "bg-paper-300/70 text-ink-900 font-medium"
           : vimHighlight
             ? "vim-cursor"
-            : "text-ink-800 hover:bg-paper-200/70",
+            : "text-ink-800 [@media(hover:hover)]:hover:bg-paper-200/70",
       ].join(" ")}
       style={{ paddingLeft: 4 }}
       {...(sidebarIdx != null
@@ -5954,253 +5936,7 @@ function SystemRow({
       {sidebarFocused && vimHighlight && (
         <RowKeyHint active={active} keyLabel="m" compact={count > 0} />
       )}
-      {count > 0 && (
-        <span
-          className={[
-            "shrink-0 pr-2 text-xs",
-            strongActive ? "text-ink-700" : "text-ink-500",
-          ].join(" ")}
-        >
-          {count}
-        </span>
-      )}
     </div>
-  );
-}
-
-function SidebarRow({
-  icon,
-  label,
-  count,
-  trailing,
-  active,
-  onClick,
-  sidebarIdx,
-  vimHighlight,
-  sidebarFocused = false,
-  sidebarData,
-}: {
-  icon: JSX.Element;
-  label: string;
-  count?: number;
-  trailing?: JSX.Element;
-  active?: boolean;
-  onClick: () => void;
-  sidebarIdx?: number;
-  vimHighlight?: boolean;
-  sidebarFocused?: boolean;
-  sidebarData?: { type: string };
-}): JSX.Element {
-  const strongActive = !!active && (!sidebarFocused || !!vimHighlight);
-
-  return (
-    <button
-      onClick={onClick}
-      className={[
-        "group flex h-[var(--z-sidebar-row-h)] items-center gap-2 rounded-lg px-2 text-sm outline-none transition-colors focus:outline-none",
-        active
-          ? vimHighlight
-            ? "vim-cursor-on-active bg-paper-300/70 text-ink-900 font-medium"
-            : sidebarFocused
-              ? "text-accent"
-              : "bg-paper-300/70 text-ink-900 font-medium"
-          : vimHighlight
-            ? "vim-cursor"
-            : "text-ink-800 hover:bg-paper-200/70",
-      ].join(" ")}
-      {...(sidebarIdx != null
-        ? {
-            "data-sidebar-idx": sidebarIdx,
-            "data-sidebar-type": sidebarData?.type ?? "settings",
-          }
-        : {})}
-    >
-      <span
-        className={
-          strongActive ? "text-ink-900" : "text-ink-500 group-hover:text-ink-800"
-        }
-      >
-        {icon}
-      </span>
-      <span className="flex-1 truncate text-left">{label}</span>
-      {sidebarFocused && vimHighlight && (
-        <RowKeyHint
-          active={!!active}
-          keyLabel="m"
-          compact={typeof count === "number" && count > 0}
-        />
-      )}
-      {typeof count === "number" && count > 0 && (
-        <span
-          className={[
-            "text-xs",
-            strongActive ? "text-ink-700" : "text-ink-500",
-          ].join(" ")}
-        >
-          {count}
-        </span>
-      )}
-      {trailing}
-    </button>
-  );
-}
-
-interface SidebarFooterActionProps {
-  icon: JSX.Element;
-  label: string;
-  title?: string;
-  count?: number;
-  badgeLabel?: string;
-  active?: boolean;
-  /** Narrow-sidebar mode (#539): the label is dropped and the tooltip and
-   *  aria-label carry it instead, so the row never outgrows the sidebar. */
-  iconOnly?: boolean;
-  onClick: () => void;
-  sidebarIdx?: number;
-  vimHighlight?: boolean;
-  sidebarFocused?: boolean;
-  sidebarData?: { type: string };
-}
-
-/**
- * The Settings row carries the updater badge, so it is the one piece of the
- * sidebar that needs the updater state. It subscribes here, in a leaf, rather
- * than in Sidebar itself: a download broadcasts a new state about once a
- * second for its whole duration, and each broadcast used to re-render the
- * entire sidebar tree to repaint one percentage badge (#868).
- */
-function SidebarSettingsAction(
-  props: Omit<
-    SidebarFooterActionProps,
-    "icon" | "label" | "title" | "badgeLabel"
-  >,
-): JSX.Element {
-  const appUpdateState = useAppUpdateState();
-  const title =
-    appUpdateState?.phase === "downloaded"
-      ? "Settings, update ready to install"
-      : appUpdateState?.phase === "downloading"
-        ? "Settings, update downloading"
-        : appUpdateState?.phase === "available"
-          ? "Settings, update available"
-          : "Settings";
-  return (
-    <SidebarFooterAction
-      {...props}
-      icon={<SettingsIcon />}
-      label="Settings"
-      title={title}
-      badgeLabel={appUpdateBadgeLabel(appUpdateState) ?? undefined}
-    />
-  );
-}
-
-/** Compact labeled action used in the sidebar footer. Same vim-nav
- *  wiring as SidebarRow (sidebarIdx / sidebarData), but kept short so
- *  vault utilities stay legible without stealing space from the tree. */
-function SidebarFooterAction({
-  icon,
-  label,
-  title,
-  count,
-  badgeLabel,
-  active,
-  iconOnly,
-  onClick,
-  sidebarIdx,
-  vimHighlight,
-  sidebarFocused = false,
-  sidebarData,
-}: SidebarFooterActionProps): JSX.Element {
-  const strongActive = !!active && (!sidebarFocused || !!vimHighlight);
-  const resolvedTitle = title ?? label;
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={resolvedTitle}
-      aria-label={resolvedTitle}
-      className={[
-        "inline-flex h-8 min-w-0 items-center gap-1.5 overflow-hidden rounded-lg px-2.5 text-xs font-medium leading-none transition-colors whitespace-nowrap",
-        active
-          ? vimHighlight
-            ? "vim-cursor-on-active bg-paper-300/70 text-ink-900 font-medium"
-            : sidebarFocused
-              ? "text-accent"
-              : "bg-paper-300/70 text-ink-900 font-medium"
-          : vimHighlight
-            ? "vim-cursor"
-            : "text-ink-500 hover:bg-paper-200/70 hover:text-ink-900",
-      ].join(" ")}
-      {...(sidebarIdx != null
-        ? {
-            "data-sidebar-idx": sidebarIdx,
-            "data-sidebar-type": sidebarData?.type ?? "settings",
-          }
-        : {})}
-    >
-      <span
-        className={["shrink-0", strongActive ? "text-ink-900" : ""].join(" ")}
-      >
-        {icon}
-      </span>
-      {!iconOnly && <span className="truncate">{label}</span>}
-      {!iconOnly && typeof count === "number" && (
-        <span
-          className={[
-            "shrink-0 rounded-full px-1.5 py-0.5 text-2xs",
-            strongActive
-              ? "bg-ink-900/10 text-ink-700"
-              : "bg-paper-200/80 text-ink-500",
-          ].join(" ")}
-        >
-          {count}
-        </span>
-      )}
-      {badgeLabel && (
-        <span
-          className={[
-            "shrink-0 rounded-full px-1.5 py-0.5 text-2xs font-semibold",
-            strongActive
-              ? "bg-accent/20 text-accent"
-              : "bg-accent/12 text-accent",
-          ].join(" ")}
-        >
-          {badgeLabel}
-        </span>
-      )}
-    </button>
-  );
-}
-
-function IconBtn({
-  children,
-  onClick,
-  title,
-  active,
-}: {
-  children: JSX.Element;
-  onClick: (e: React.MouseEvent) => void;
-  title: string;
-  active?: boolean;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={title}
-      className={[
-        "group relative flex h-7 w-7 items-center justify-center rounded-md transition-colors",
-        active
-          ? "bg-accent/15 text-accent"
-          : "text-ink-500 hover:bg-paper-200 hover:text-ink-800",
-      ].join(" ")}
-    >
-      <span className="pointer-events-none">{children}</span>
-      <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 hidden -translate-x-1/2 whitespace-nowrap rounded-md border border-paper-300 bg-paper-50 px-2 py-1 text-xs font-medium text-ink-800 shadow-panel group-hover:block group-focus-visible:block">
-        {title}
-      </span>
-    </button>
   );
 }
 
@@ -6490,7 +6226,7 @@ function RowKeyHint({
   return (
     <span
       className={[
-        "pointer-events-none shrink-0 rounded-md border px-1.5 py-0.5 text-2xs leading-none",
+        "zn-navigation-key-hint pointer-events-none shrink-0 rounded-md border px-1.5 py-0.5 text-2xs leading-none",
         active
           ? "border-ink-900/20 bg-ink-900/10 text-ink-700"
           : "border-paper-300/70 bg-paper-100/75 text-ink-500",

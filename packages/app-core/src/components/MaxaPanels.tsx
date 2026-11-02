@@ -4,16 +4,22 @@ import { useStore } from '../store'
 import { useMaxaPanels } from '../lib/maxa-panels'
 import { focusEditorNormalMode } from '../lib/editor-focus'
 import { isImeComposing } from '../lib/ime'
-import { ChevronRightIcon } from './icons'
+import {
+  useStableSidebarIdxBase,
+  type SidebarIdxCounter,
+  type SidebarIdxPass,
+} from '../lib/sidebar-idx-counter'
 import { Modal } from './ui/Modal'
 
-const RECENT_COLLAPSED_KEY = 'zen:recent-collapsed'
 function useRecentNotes() {
   const notes = useStore((s) => s.notes)
   // The server-owned note list already applies exclusions and watcher updates.
   return useMemo(
-    () => notes.filter((n) => n.folder !== 'trash').sort((a, b) => b.updatedAt - a.updatedAt),
-    [notes]
+    () =>
+      notes
+        .filter((n) => n.folder !== 'trash')
+        .sort((a, b) => b.updatedAt - a.updatedAt),
+    [notes],
   )
 }
 function useRecentClock(): void {
@@ -33,74 +39,56 @@ function relativeTime(updatedAt: number): string {
         ? `${Math.floor(seconds / 3600)}h ago`
         : `${Math.floor(seconds / 86400)}d ago`
 }
-export function SidebarRecent(): JSX.Element {
+export function SidebarRecent({
+  idxCounter,
+  idxPass,
+  vimCursor,
+}: {
+  idxCounter: SidebarIdxCounter
+  idxPass: SidebarIdxPass
+  vimCursor: number
+}): JSX.Element {
   const notes = useRecentNotes()
+  const selectedPath = useStore((s) => s.selectedPath)
   useRecentClock()
-  const [collapsed, setCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(RECENT_COLLAPSED_KEY) !== 'false'
-    } catch {
-      return true
-    }
-  })
+  useStableSidebarIdxBase(idxCounter, idxPass)
   return (
-    <section aria-label="Recent" className="shrink-0 px-3 py-1">
-      <button
-        type="button"
-        aria-expanded={!collapsed}
-        aria-controls="sidebar-recent-list"
-        onClick={() =>
-          setCollapsed((previous) => {
-            const next = !previous
-            try {
-              localStorage.setItem(RECENT_COLLAPSED_KEY, String(next))
-            } catch {
-              /* storage may be disabled */
-            }
-            return next
-          })
-        }
-        className="flex h-7 w-full items-center gap-1 rounded px-1 text-left text-xs font-medium text-ink-500 hover:bg-paper-200/70"
-      >
-        <ChevronRightIcon
-          className={`h-3 w-3 shrink-0 transition-transform ${collapsed ? '' : 'rotate-90'}`}
-        />
-        Recent
-      </button>
-      {!collapsed && (
-        <ul
-          id="sidebar-recent-list"
-          aria-label="Recent files"
-          className="overflow-y-auto overscroll-contain"
-          style={{ maxHeight: 'min(14rem, 25vh)' }}
-        >
-          {notes.slice(0, 50).map((note) => (
-            <li key={note.path}>
-              <button
-                type="button"
-                title={note.path}
-                className="flex h-7 w-full items-center gap-2 rounded px-2 text-left text-xs text-ink-700 hover:bg-paper-200/70"
-                onClick={() =>
-                  void useStore
-                    .getState()
-                    .selectNote(note.path)
-                    .then(() => focusEditorNormalMode())
-                }
+    <ul aria-label="最近">
+      {notes.slice(0, 50).map((note) => {
+        const idx = idxCounter.value++
+        return (
+          <li key={note.path}>
+            <button
+              type="button"
+              title={note.path.slice(0, note.path.lastIndexOf('/')) || '/'}
+              data-sidebar-idx={idx}
+              data-sidebar-type="note"
+              data-sidebar-path={note.path}
+              className={`flex h-[var(--z-sidebar-row-h)] w-full items-center gap-2 rounded px-2 text-left text-xs ${vimCursor === idx ? 'vim-cursor' : selectedPath === note.path ? 'bg-paper-300/70 text-ink-900' : 'text-ink-700 [@media(hover:hover)]:hover:bg-paper-200/70'}`}
+              onClick={() =>
+                void useStore
+                  .getState()
+                  .selectNote(note.path)
+                  .then(() => focusEditorNormalMode())
+              }
+            >
+              <span className="min-w-0 flex-1 truncate">
+                {note.displayTitle || note.title}
+              </span>
+              <time
+                className="shrink-0 text-right text-2xs tabular-nums text-ink-400"
+                dateTime={new Date(note.updatedAt).toISOString()}
               >
-                <span className="min-w-0 flex-1 truncate">{note.displayTitle || note.title}</span>
-                <time
-                  className="shrink-0 text-right text-2xs tabular-nums text-ink-400"
-                  dateTime={new Date(note.updatedAt).toISOString()}
-                >
-                  {relativeTime(note.updatedAt)}
-                </time>
-              </button>
-            </li>
-          ))}
-          {!notes.length && <li className="px-2 py-1 text-xs text-ink-400">No recent files.</li>}
-        </ul>
+                {relativeTime(note.updatedAt)}
+              </time>
+            </button>
+          </li>
+        )
+      })}
+      {!notes.length && (
+        <li className="px-2 py-1 text-xs text-ink-400">No recent files.</li>
       )}
-    </section>
+    </ul>
   )
 }
 function RecentPalette(): JSX.Element {
@@ -115,7 +103,7 @@ function RecentPalette(): JSX.Element {
     return notes.filter((n) =>
       `${n.displayTitle || n.title} ${n.title} ${n.path} ${(n.aliases ?? []).join(' ')}`
         .toLowerCase()
-        .includes(q)
+        .includes(q),
     )
   }, [notes, query])
   const active = Math.min(cursor, Math.max(0, filtered.length - 1))
@@ -148,7 +136,9 @@ function RecentPalette(): JSX.Element {
           ref={input}
           aria-label="Filter Recent"
           aria-controls="recent-palette-list"
-          aria-activedescendant={filtered.length ? `recent-option-${active}` : undefined}
+          aria-activedescendant={
+            filtered.length ? `recent-option-${active}` : undefined
+          }
           role="combobox"
           aria-expanded="true"
           aria-autocomplete="list"
@@ -166,8 +156,11 @@ function RecentPalette(): JSX.Element {
               setCursor(
                 Math.max(
                   0,
-                  Math.min(filtered.length - 1, active + (e.key === 'ArrowDown' ? 1 : -1))
-                )
+                  Math.min(
+                    filtered.length - 1,
+                    active + (e.key === 'ArrowDown' ? 1 : -1),
+                  ),
+                ),
               )
             }
             if (e.key === 'Enter' && filtered[active]) {
@@ -201,15 +194,23 @@ function RecentPalette(): JSX.Element {
               className={`flex w-full items-center gap-3 rounded px-3 py-2 text-left text-sm ${index === active ? 'bg-paper-200 text-ink-900' : 'text-ink-700 hover:bg-paper-200/70'}`}
             >
               <span className="min-w-0 flex-1">
-                <span className="block truncate">{note.displayTitle || note.title}</span>
-                <small className="block truncate text-xs text-ink-400">{note.path}</small>
+                <span className="block truncate">
+                  {note.displayTitle || note.title}
+                </span>
+                <small className="block truncate text-xs text-ink-400">
+                  {note.path}
+                </small>
               </span>
-              <span className="shrink-0 text-xs text-ink-400">{relativeTime(note.updatedAt)}</span>
+              <span className="shrink-0 text-xs text-ink-400">
+                {relativeTime(note.updatedAt)}
+              </span>
             </button>
           </li>
         ))}
         {!filtered.length && (
-          <li className="p-4 text-center text-sm text-ink-400">No matching recent files.</li>
+          <li className="p-4 text-center text-sm text-ink-400">
+            No matching recent files.
+          </li>
         )}
       </ul>
     </Modal>

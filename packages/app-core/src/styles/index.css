@@ -6360,3 +6360,14 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
   --ext-success: rgb(var(--z-green));
   --ext-warning: rgb(var(--z-yellow));
 }
+
+/* Client navigation: the panel owns one scroller; activity extensions scroll independently. */
+.zn-activity-item { min-height: 56px; min-width: 40px; }
+.zn-knowledge-panel { background-color: rgb(var(--z-bg)); }
+@media (pointer: coarse) {
+  .zn-activity-item, .zn-panel-header-button, .zn-panel-segment,
+  .zn-knowledge-panel [data-sidebar-type="archive"],
+  .zn-knowledge-panel [data-sidebar-type="trash"],
+  .zn-knowledge-panel [data-sidebar-type="assets"] { min-width: 40px; min-height: 40px; }
+  .zn-navigation-key-hint { display: none !important; }
+}
