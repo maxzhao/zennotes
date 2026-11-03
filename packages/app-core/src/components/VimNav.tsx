@@ -1,3 +1,4 @@
+import { closeKnowledgeDrawer } from '../lib/knowledge-panel'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { completionStatus } from '@codemirror/autocomplete'
 import {
@@ -2312,6 +2313,7 @@ export function VimNav(): JSX.Element | null {
       return
     }
     const itemType = el.dataset.sidebarType
+    if (["note", "asset", "tasks", "workflows", "atlas", "archive", "trash", "assets"].includes(itemType || "") || el.dataset.sidebarDatabase || (itemType === "tag" && (el.dataset.sidebarTagReal === "1" || !state.nestedTags))) closeKnowledgeDrawer()
     if (itemType === 'folder') {
       // A `<Name>.base` folder is a database. Its grid only opened through a
       // real click (the database case lives in the row's click handler), so
@@ -2373,6 +2375,9 @@ export function VimNav(): JSX.Element | null {
       void state.openTrashView()
     } else if (itemType === 'assets') {
       void state.openAssetsView()
+    } else {
+      // Header controls, panel tabs and other action rows keep their own handlers.
+      el.click()
     }
   }
 

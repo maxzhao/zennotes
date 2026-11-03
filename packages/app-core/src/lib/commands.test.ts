@@ -458,7 +458,7 @@ describe('saved Tasks filters (#731)', () => {
     useStore.getState().saveTaskFilter('Blocked', '@status:blocked')
     useStore.getState().saveTaskFilter('Project alpha', '@project:alpha')
     const entries = buildCommands().filter((c) => c.id.startsWith('tasks.savedFilter.'))
-    expect(entries.map((c) => c.title)).toEqual(['Tasks: Blocked', 'Tasks: Project alpha'])
+    expect(entries.map((c) => c.title)).toEqual(['待办: Blocked', '待办: Project alpha'])
     expect(entries[1].keywords).toContain('@project:alpha')
 
     const openTasksView = vi.fn().mockResolvedValue(undefined)

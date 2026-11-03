@@ -5,7 +5,6 @@ import type { VaultChangeEvent } from '@shared/ipc'
 import { useStore } from '../store'
 import { parseExtensionTab } from '../lib/extension-path'
 import { focusEditorNormalMode } from '../lib/editor-focus'
-import { ChevronRightIcon } from './icons'
 
 interface Extension {
   name: string
@@ -47,7 +46,7 @@ function serviceURL(name: string, path: string): string {
   const relative = path.replace(/^\//, '')
   const url = new URL(
     `${basePath()}/api/ext/${name}/svc/${relative}`,
-    location.origin
+    location.origin,
   )
   const prefix = `${basePath()}/api/ext/${name}/svc/`
   if (url.origin !== location.origin || !url.pathname.startsWith(prefix))
@@ -64,11 +63,11 @@ function makeAPI(extension: Extension) {
       async list(prefix: string) {
         const [notes, assets] = await Promise.all([
           window.zen.listNotes(),
-          window.zen.listAssets()
+          window.zen.listAssets(),
         ])
         return [
           ...notes.map((n) => ({ path: n.path, kind: 'note' as const })),
-          ...assets.map((a) => ({ path: a.path, kind: 'asset' as const }))
+          ...assets.map((a) => ({ path: a.path, kind: 'asset' as const })),
         ].filter((f) => f.path.startsWith(prefix))
       },
       async read(path: string) {
@@ -81,7 +80,7 @@ function makeAPI(extension: Extension) {
         return window.zen.onVaultChange((event) => {
           if (!event.path || event.path.startsWith(prefix)) cb(event)
         })
-      }
+      },
     },
     service: {
       url(path: string) {
@@ -90,24 +89,24 @@ function makeAPI(extension: Extension) {
       fetch(path: string, init?: RequestInit) {
         return fetch(serviceURL(name, path), {
           ...init,
-          credentials: 'same-origin'
+          credentials: 'same-origin',
         })
       },
       events(path: string, onMessage: (event: MessageEvent) => void) {
         const source = new EventSource(serviceURL(name, path))
         source.onmessage = onMessage
         return () => source.close()
-      }
+      },
     },
     theme: {
       get mode() {
         return useStore.getState().themeMode
-      }
-    }
+      },
+    },
   }
 }
 async function activate(
-  extension: Extension
+  extension: Extension,
 ): Promise<Record<string, React.ComponentType>> {
   const key = `${extension.name}:${extension.version}`
   let activation = activations.get(key)
@@ -125,7 +124,7 @@ async function activate(
         })
         styleVersions.set(extension.name, {
           version: extension.version!,
-          links
+          links,
         })
       }
       const attempt = activationAttempts.get(key) ?? 0
@@ -155,7 +154,7 @@ async function activate(
 }
 function ExtensionError({
   error,
-  retry
+  retry,
 }: {
   error: unknown
   retry: () => void
@@ -232,7 +231,7 @@ export function ExtensionTab({ path }: { path: string }): JSX.Element {
     try {
       const response = await fetch(`${basePath()}/api/ext`, {
         credentials: 'same-origin',
-        cache: 'no-cache'
+        cache: 'no-cache',
       })
       if (response.ok) {
         const result = await response.json()
@@ -264,34 +263,32 @@ export function ExtensionTab({ path }: { path: string }): JSX.Element {
     </div>
   )
 }
-function openExtensionView(path: string): void {
+export function openExtensionView(path: string): void {
   const state = useStore.getState()
   void state
     .openNoteInPane(state.activePaneId, path)
     .then(() => focusEditorNormalMode())
 }
-export function SidebarExtensions(): JSX.Element | null {
+export function extensionIconURL(extension: Extension, view: string): string {
+  return versionURL(
+    `/api/ext/${encodeURIComponent(extension.name)}/web/icons/${encodeURIComponent(view)}.svg`,
+    extension.version || '',
+  )
+}
+export function ExtensionRuntime(): JSX.Element | null {
   const vault = useStore((s) => s.vault)
-  const activePath = useStore((s) => s.selectedPath)
   const restored = useStore((s) => s.workspaceRestored)
   const transitioning = useStore((s) => s.workspaceTransitioning)
   const extensions = useExtensions((s) => s.extensions)
   const loaded = useExtensions((s) => s.loaded)
   const notice = useExtensions((s) => s.notice)
-  const [collapsed, setCollapsed] = React.useState(() => {
-    try {
-      return localStorage.getItem('zen:extensions-collapsed') === 'true'
-    } catch {
-      return false
-    }
-  })
   React.useEffect(() => {
     if (window.zen.getAppInfo().runtime !== 'web' || !vault) return
     let current = true
     useExtensions.setState({ loaded: false, extensions: [], notice: '' })
     void fetch(`${basePath()}/api/ext`, {
       credentials: 'same-origin',
-      cache: 'no-cache'
+      cache: 'no-cache',
     })
       .then(async (response) => {
         if (response.status === 404) return null
@@ -340,83 +337,20 @@ export function SidebarExtensions(): JSX.Element | null {
     window.addEventListener('hashchange', openHash)
     return () => window.removeEventListener('hashchange', openHash)
   }, [loaded, restored, transitioning, extensions])
-  if (!extensions.length && !notice) return null
-  return (
-    <section aria-label="Extensions" className="shrink-0 px-3 py-1">
+  return notice ? (
+    <div
+      role="status"
+      className="fixed bottom-4 right-4 z-toast max-w-sm rounded-lg border border-paper-300 bg-paper-50 p-3 text-sm shadow-panel"
+    >
+      {notice}
       <button
         type="button"
-        aria-expanded={!collapsed}
-        aria-controls="sidebar-extensions-list"
-        className="flex h-7 w-full items-center gap-1 rounded px-1 text-left text-xs font-medium text-ink-500 hover:bg-paper-200/70"
-        onClick={() =>
-          setCollapsed((previous) => {
-            const next = !previous
-            try {
-              localStorage.setItem('zen:extensions-collapsed', String(next))
-            } catch {
-              /* storage disabled */
-            }
-            return next
-          })
-        }
+        className="ml-3 p-2"
+        aria-label="Dismiss notice"
+        onClick={() => useExtensions.setState({ notice: '' })}
       >
-        <ChevronRightIcon
-          className={`h-3 w-3 shrink-0 transition-transform ${collapsed ? '' : 'rotate-90'}`}
-        />
-        Extensions
+        ×
       </button>
-      {notice && (
-        <p role="status" className="px-2 text-xs text-ink-400">
-          {notice}
-          <button
-            className="ml-2"
-            aria-label="Dismiss notice"
-            onClick={() => useExtensions.setState({ notice: '' })}
-          >
-            ×
-          </button>
-        </p>
-      )}
-      {!collapsed && (
-        <div
-          id="sidebar-extensions-list"
-          className="max-h-[30vh] overflow-y-auto overscroll-contain"
-        >
-          {extensions.map((extension) => (
-            <div key={extension.name}>
-              <p className="truncate px-2 pt-1 text-2xs font-medium text-ink-400">
-                {extension.title || extension.name}
-              </p>
-              {extension.error ? (
-                <p className="px-2 py-1 text-xs text-ink-400">
-                  {extension.error}
-                </p>
-              ) : (
-                extension.views?.map((view) => {
-                  const path = `ext:${extension.name}/${view.id}`
-                  const active = activePath === path
-                  return (
-                    <button
-                      key={view.id}
-                      type="button"
-                      aria-current={active ? 'page' : undefined}
-                      className={[
-                        'flex h-7 w-full items-center rounded px-2 text-left text-xs',
-                        active
-                          ? 'bg-paper-300/70 text-ink-900 font-medium'
-                          : 'text-ink-700 hover:bg-paper-200/70'
-                      ].join(' ')}
-                      onClick={() => openExtensionView(path)}
-                    >
-                      <span className="truncate">{view.title}</span>
-                    </button>
-                  )
-                })
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  )
+    </div>
+  ) : null
 }

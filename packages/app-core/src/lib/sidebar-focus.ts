@@ -20,6 +20,8 @@ export function focusSidebarPanel(
   // whether to hand focus to the editor, and a deferred write makes it see
   // the old 'editor' value and start a competing focus-retry loop that the
   // sidebar then loses.
+  if (useStore.getState().zenMode) useStore.getState().setFocusMode(false)
+  if (!useStore.getState().sidebarOpen) useStore.getState().toggleSidebar()
   useStore.getState().setFocusedPanel('sidebar')
 
   const run = (remaining: number): void => {
