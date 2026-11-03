@@ -6,7 +6,7 @@ import { useStore } from '../store'
 import { parseExtensionTab } from '../lib/extension-path'
 import { focusEditorNormalMode } from '../lib/editor-focus'
 
-interface Extension {
+export interface Extension {
   name: string
   source: 'project' | 'global'
   title?: string
@@ -15,13 +15,24 @@ interface Extension {
   styles?: string[]
   service?: boolean
   version?: string
+  order?: number
   error: string | null
 }
 export const useExtensions = create<{
   extensions: Extension[]
   loaded: boolean
   notice: string
-}>(() => ({ extensions: [], loaded: false, notice: '' }))
+  order: string[]
+  orderLoaded: boolean
+  orderSaving: boolean
+}>(() => ({
+  extensions: [],
+  loaded: false,
+  notice: '',
+  order: [],
+  orderLoaded: false,
+  orderSaving: false,
+}))
 const activations = new Map<
   string,
   Promise<Record<string, React.ComponentType>>
@@ -38,6 +49,40 @@ function basePath(): string {
       ?.getAttribute('content')
       ?.replace(/\/$/, '') ?? ''
   )
+}
+function activityOrderResult(result: { order?: unknown }): string[] {
+  if (
+    !Array.isArray(result.order) ||
+    !result.order.every((id) => typeof id === 'string')
+  )
+    throw new Error('Invalid activity order response')
+  return result.order
+}
+export async function saveActivityOrder(order: string[]): Promise<void> {
+  const previous = useExtensions.getState().order
+  const project = useStore.getState().vault?.root
+  useExtensions.setState({ order, orderSaving: true })
+  try {
+    const response = await fetch(`${basePath()}/api/maxa/activity-order`, {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order }),
+    })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const stored = activityOrderResult(await response.json())
+    if (useStore.getState().vault?.root === project)
+      useExtensions.setState({ order: stored })
+  } catch (error) {
+    if (useStore.getState().vault?.root === project)
+      useExtensions.setState({
+        order: previous,
+        notice: `保存活动栏顺序失败：${String(error)}`,
+      })
+  } finally {
+    if (useStore.getState().vault?.root === project)
+      useExtensions.setState({ orderSaving: false })
+  }
 }
 function versionURL(path: string, version: string): string {
   return `${basePath()}${path}${path.includes('?') ? '&' : '?'}v=${encodeURIComponent(version)}`
@@ -285,7 +330,14 @@ export function ExtensionRuntime(): JSX.Element | null {
   React.useEffect(() => {
     if (window.zen.getAppInfo().runtime !== 'web' || !vault) return
     let current = true
-    useExtensions.setState({ loaded: false, extensions: [], notice: '' })
+    useExtensions.setState({
+      loaded: false,
+      extensions: [],
+      notice: '',
+      order: [],
+      orderLoaded: false,
+      orderSaving: false,
+    })
     void fetch(`${basePath()}/api/ext`, {
       credentials: 'same-origin',
       cache: 'no-cache',
@@ -298,9 +350,29 @@ export function ExtensionRuntime(): JSX.Element | null {
           ? (result.extensions as Extension[])
           : null
       })
-      .then((entries) => {
-        if (current)
-          useExtensions.setState({ loaded: true, extensions: entries ?? [] })
+      .then(async (entries) => {
+        if (!current) return
+        useExtensions.setState({ loaded: true, extensions: entries ?? [] })
+        if (
+          !entries?.some(
+            (extension) => !extension.error && extension.views?.length,
+          )
+        )
+          return
+        try {
+          const response = await fetch(
+            `${basePath()}/api/maxa/activity-order`,
+            { credentials: 'same-origin', cache: 'no-cache' },
+          )
+          if (!response.ok) throw new Error(`HTTP ${response.status}`)
+          const order = activityOrderResult(await response.json())
+          if (current) useExtensions.setState({ order, orderLoaded: true })
+        } catch (error) {
+          if (current)
+            useExtensions.setState({
+              notice: `加载活动栏顺序失败：${String(error)}`,
+            })
+        }
       })
       .catch((error) => {
         if (current)

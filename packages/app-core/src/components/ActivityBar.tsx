@@ -1,11 +1,21 @@
 import { closeKnowledgeDrawer } from '../lib/knowledge-panel'
-import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+  type PointerEvent,
+} from 'react'
+import { useActivityDrag } from '../lib/use-activity-drag'
 import { isHelpViewActive, useStore } from '../store'
 import { findLeaf } from '../lib/pane-layout'
 import {
   useExtensions,
   extensionIconURL,
   openExtensionView,
+  saveActivityOrder,
 } from './ExtensionHost'
 import { VaultBadge } from './VaultBadge'
 import { DocumentIcon, SettingsIcon } from './icons'
@@ -21,6 +31,7 @@ function ActivityItem({
   children,
   onClick,
   onContextMenu,
+  onPointerDown,
 }: {
   label: string
   title?: string
@@ -30,6 +41,7 @@ function ActivityItem({
   disabled?: boolean
   children: ReactNode
   onClick?: (event: MouseEvent<HTMLButtonElement>) => void
+  onPointerDown?: (event: PointerEvent<HTMLButtonElement>) => void
   onContextMenu?: (event: MouseEvent<HTMLButtonElement>) => void
 }): JSX.Element {
   return (
@@ -39,6 +51,7 @@ function ActivityItem({
       aria-label={accessibleName}
       disabled={disabled}
       aria-current={active ? 'page' : undefined}
+      onPointerDown={onPointerDown}
       onClick={onClick}
       onContextMenu={onContextMenu}
       className={`zn-activity-item relative flex w-full shrink-0 flex-col items-center justify-center gap-1 rounded-lg px-1 py-2 text-xs disabled:cursor-not-allowed ${active || open ? 'bg-paper-300/70 text-ink-900' : 'text-ink-600 [@media(hover:hover)]:hover:bg-paper-200/70'}`}
@@ -117,6 +130,44 @@ export function ActivityBar({
   )
   const helpActive = useStore(isHelpViewActive)
   const extensions = useExtensions((s) => s.extensions)
+  const savedOrder = useExtensions((s) => s.order)
+  const orderLoaded = useExtensions((s) => s.orderLoaded)
+  const orderSaving = useExtensions((s) => s.orderSaving)
+  const group = useRef<HTMLDivElement>(null)
+  const validItems = useMemo(() => {
+    const ranks = new Map(savedOrder.map((id, i) => [id, i]))
+    return extensions
+      .flatMap((extension) =>
+        extension.error
+          ? []
+          : (extension.views ?? []).map((view) => ({
+              extension,
+              view,
+              id: `${extension.name}/${view.id}`,
+            })),
+      )
+      .sort((a, b) => {
+        const aRank = ranks.get(a.id),
+          bRank = ranks.get(b.id)
+        if (aRank !== undefined || bRank !== undefined)
+          return (aRank ?? Infinity) - (bRank ?? Infinity)
+        return (a.extension.order ?? 1000) - (b.extension.order ?? 1000)
+      })
+  }, [extensions, savedOrder])
+  const ids = validItems.map((item) => item.id)
+  const drag = useActivityDrag(
+    group,
+    ids,
+    orderLoaded && !orderSaving,
+    (next) => {
+      const current = new Set(next)
+      void saveActivityOrder([
+        ...next,
+        ...savedOrder.filter((id) => !current.has(id)),
+      ])
+    },
+  )
+  const remaining = ids.filter((id) => id !== drag.active)
   const update = useAppUpdateState()
   const badge = appUpdateBadgeLabel(update)
   const hasExtensionItems = extensions.some(
@@ -167,43 +218,71 @@ export function ActivityBar({
       {hasExtensionItems && (
         <div aria-hidden="true" className="mx-2 h-px shrink-0 bg-paper-300" />
       )}
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-        {extensions.map((extension) =>
-          extension.error ? (
+      <div
+        ref={group}
+        onClickCapture={drag.onClickCapture}
+        aria-label="扩展"
+        aria-busy={orderSaving}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain select-none"
+        style={{ touchAction: 'pan-y' }}
+      >
+        {validItems.map(({ extension, view, id }) => (
+          <div
+            key={id}
+            data-activity-id={id}
+            className={`relative ${drag.active === id ? 'opacity-60' : ''}`}
+          >
+            {drag.position !== null && remaining[drag.position] === id && (
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-1 top-0 z-10 h-0.5 bg-accent"
+              />
+            )}
             <ActivityItem
-              key={extension.name}
-              label={extension.name}
-              title={extension.error}
-              accessibleName={`${extension.name}: ${extension.error}`}
-              disabled
+              label={view.title}
+              title={`${view.title} · ${extension.title || extension.name}`}
+              active={activePath === `ext:${id}`}
+              onPointerDown={(event) => drag.onPointerDown(event, id)}
+              onContextMenu={(event) => {
+                if (drag.active) event.preventDefault()
+              }}
+              onClick={() => {
+                openExtensionView(`ext:${id}`)
+                closeKnowledgeDrawer()
+              }}
             >
-              <span className="relative flex h-7 w-7 items-center justify-center">
-                {Array.from(extension.name)[0]}
-                <span className="absolute right-0 top-0 flex h-3 w-3 items-center justify-center rounded-full bg-warning text-[10px] font-bold leading-none text-black ring-1 ring-paper-100">
-                  !
-                </span>
-              </span>
+              <ExtensionGlyph
+                url={extensionIconURL(extension, view.id)}
+                fallback={Array.from(view.title)[0] || ''}
+              />
             </ActivityItem>
-          ) : (
-            extension.views?.map((view) => (
-              <ActivityItem
-                key={`${extension.name}/${view.id}`}
-                label={view.title}
-                title={`${view.title} · ${extension.title || extension.name}`}
-                active={activePath === `ext:${extension.name}/${view.id}`}
-                onClick={() => {
-                  openExtensionView(`ext:${extension.name}/${view.id}`)
-                  closeKnowledgeDrawer()
-                }}
-              >
-                <ExtensionGlyph
-                  url={extensionIconURL(extension, view.id)}
-                  fallback={Array.from(view.title)[0] || ''}
-                />
-              </ActivityItem>
-            ))
-          ),
+          </div>
+        ))}
+        {drag.position === remaining.length && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none relative z-10 mx-1 -mt-0.5 h-0.5 bg-accent"
+          />
         )}
+        {extensions
+          .filter((extension) => extension.error)
+          .map((extension) => (
+            <div key={extension.name} data-activity-invalid>
+              <ActivityItem
+                label={extension.name}
+                title={extension.error!}
+                accessibleName={`${extension.name}: ${extension.error}`}
+                disabled
+              >
+                <span className="relative flex h-7 w-7 items-center justify-center">
+                  {Array.from(extension.name)[0]}
+                  <span className="absolute right-0 top-0 flex h-3 w-3 items-center justify-center rounded-full bg-warning text-[10px] font-bold leading-none text-black ring-1 ring-paper-100">
+                    !
+                  </span>
+                </span>
+              </ActivityItem>
+            </div>
+          ))}
       </div>
       <div className="flex shrink-0 flex-col gap-1">
         <ActivityItem
